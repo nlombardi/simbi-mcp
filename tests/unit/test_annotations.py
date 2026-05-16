@@ -18,6 +18,8 @@ def test_visual_type_values() -> None:
 def test_visual_attrs_has_all_types() -> None:
     for vt in VisualType:
         assert vt in VISUAL_ATTRS, f"Missing VISUAL_ATTRS entry for {vt}"
+        assert "required" in VISUAL_ATTRS[vt]
+        assert "optional" in VISUAL_ATTRS[vt]
 
 
 def test_card_requires_measure() -> None:

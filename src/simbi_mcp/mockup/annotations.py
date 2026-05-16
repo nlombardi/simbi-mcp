@@ -6,6 +6,12 @@ These constants define the data-pbi-* attribute contract between Phase 2
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import TypedDict
+
+
+class VisualAttrSpec(TypedDict):
+    required: list[str]
+    optional: list[str]
 
 
 class VisualType(StrEnum):
@@ -18,7 +24,7 @@ class VisualType(StrEnum):
 
 # Required and optional data-pbi-* attributes per visual type.
 # Phase 3 uses this same dict to know which attributes to read.
-VISUAL_ATTRS: dict[VisualType, dict[str, list[str]]] = {
+VISUAL_ATTRS: dict[VisualType, VisualAttrSpec] = {
     VisualType.CARD: {
         "required": ["data-pbi-measure"],
         "optional": [],
@@ -42,7 +48,7 @@ VISUAL_ATTRS: dict[VisualType, dict[str, list[str]]] = {
 }
 
 # Embedded in generator system prompt — tells Claude the annotation vocabulary.
-ANNOTATION_SPEC_TEXT = """\
+ANNOTATION_SPEC_TEXT: str = """\
 ANNOTATION VOCABULARY
 =====================
 Every visual must have a data-pbi attribute identifying its type, plus the
@@ -73,7 +79,7 @@ RULES:
 """
 
 # Embedded in generator system prompt — lists every CSS class Claude may use.
-CSS_CLASS_CATALOG = """\
+CSS_CLASS_CATALOG: str = """\
 AVAILABLE CSS CLASSES
 =====================
 Layout:
