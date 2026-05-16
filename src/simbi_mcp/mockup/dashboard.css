@@ -1,0 +1,98 @@
+/* SimBI Dashboard CSS — self-contained, no CDN required.
+   Defines exactly the classes listed in CSS_CLASS_CATALOG in annotations.py.
+   Page size: 1280×720 (matches Power BI Desktop default page). */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #f1f5f9;
+}
+
+/* ── Layout ─────────────────────────────────────────────── */
+.db-page {
+  width: 1280px;
+  height: 720px;
+  overflow: hidden;
+  padding: 24px;
+  background: #f1f5f9;
+}
+
+.db-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  height: 100%;
+}
+
+.db-col-1 { grid-column: span 1; }
+.db-col-2 { grid-column: span 2; }
+.db-col-3 { grid-column: span 3; }
+.db-row-1 { grid-row: span 1; }
+.db-row-2 { grid-row: span 2; }
+
+/* ── Cards and charts ────────────────────────────────────── */
+.db-card {
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.10), 0 1px 2px rgba(0, 0, 0, 0.06);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.db-label {
+  font-size: 13px;
+  color: #64748b;
+  font-weight: 500;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.db-value {
+  font-size: 36px;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.1;
+}
+
+.db-chart-area {
+  flex: 1;
+  margin-top: 12px;
+  background: #f8fafc;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #94a3b8;
+  font-size: 13px;
+  border: 1px dashed #e2e8f0;
+}
+
+/* ── Slicers ─────────────────────────────────────────────── */
+.db-slicer-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.db-pill {
+  padding: 5px 14px;
+  border-radius: 100px;
+  background: #e2e8f0;
+  font-size: 13px;
+  color: #475569;
+  cursor: pointer;
+}
+
+.db-pill.active {
+  background: #3b82f6;
+  color: #ffffff;
+}
