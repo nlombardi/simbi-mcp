@@ -1,0 +1,128 @@
+"""PBIR visual JSON template builders.
+
+Pure functions: VisualNode + ModelSchema → visual.json dict.
+No I/O, no Playwright. Each function corresponds to one Power BI visual type.
+"""
+from __future__ import annotations
+
+import re
+import uuid
+from typing import Any
+
+from simbi_mcp.mockup.annotations import VisualType
+from simbi_mcp.pbir.extractor import VisualNode
+from simbi_mcp.types import ModelSchema
+
+_COL_REF_RE = re.compile(r"^(.+)\[(.+)\]$")
+
+_VISUAL_SCHEMA = (
+    "https://developer.microsoft.com/json-schemas/fabric/item/report"
+    "/definition/visualContainer/2.3.0/schema.json"
+)
+
+# Maps our annotation VisualType to the Power BI visualType string in JSON.
+# "table" in our vocabulary maps to "tableEx" — Power BI's internal type name.
+_PBI_VISUAL_TYPE: dict[VisualType, str] = {
+    VisualType.CARD: "card",
+    VisualType.COLUMN_CHART: "columnChart",
+    VisualType.LINE_CHART: "lineChart",
+    VisualType.SLICER: "slicer",
+    VisualType.TABLE: "tableEx",
+}
+
+
+def build_visual_json(
+    node: VisualNode,
+    z_order: int,
+    schema: ModelSchema,
+) -> dict[str, Any]:
+    """Build the full visual.json dict for a single annotated DOM node."""
+    vtype = node.visual_type
+    return {
+        "$schema": _VISUAL_SCHEMA,
+        "name": _new_guid(),
+        "position": {
+            "x": node.x,
+            "y": node.y,
+            "z": z_order,
+            "height": node.height,
+            "width": node.width,
+            "tabOrder": z_order,
+        },
+        "visual": {
+            "visualType": _PBI_VISUAL_TYPE[vtype],
+            "query": {"queryState": _build_query_state(vtype, node.attrs, schema)},
+            "drillFilterOtherVisuals": True,
+        },
+    }
+
+
+def _new_guid() -> str:
+    return uuid.uuid4().hex[:20]
+
+
+def _build_query_state(
+    vtype: VisualType,
+    attrs: dict[str, str],
+    schema: ModelSchema,
+) -> dict[str, Any]:
+    if vtype is VisualType.CARD:
+        return {"Values": {"projections": [_measure_proj(attrs["data-pbi-measure"], schema)]}}
+
+    if vtype is VisualType.COLUMN_CHART:
+        return {
+            "Category": {"projections": [_column_proj(attrs["data-pbi-axis"], active=True)]},
+            "Y": {"projections": [_measure_proj(attrs["data-pbi-values"], schema)]},
+        }
+
+    if vtype is VisualType.LINE_CHART:
+        qs: dict[str, Any] = {
+            "Category": {"projections": [_column_proj(attrs["data-pbi-axis"], active=True)]},
+            "Y": {"projections": [_measure_proj(attrs["data-pbi-values"], schema)]},
+        }
+        if "data-pbi-series" in attrs:
+            qs["Series"] = {"projections": [_column_proj(attrs["data-pbi-series"])]}
+        return qs
+
+    if vtype is VisualType.SLICER:
+        return {"Field": {"projections": [_column_proj(attrs["data-pbi-field"], active=True)]}}
+
+    if vtype is VisualType.TABLE:
+        names = [n.strip() for n in attrs["data-pbi-columns"].split(",") if n.strip()]
+        return {"Values": {"projections": [_measure_proj(n, schema) for n in names]}}
+
+    raise ValueError(f"Unsupported visual type: {vtype!r}")
+
+
+def _measure_proj(name: str, schema: ModelSchema) -> dict[str, Any]:
+    m = schema.find_measure(name)
+    return {
+        "field": {
+            "Measure": {
+                "Expression": {"SourceRef": {"Entity": m.table}},
+                "Property": name,
+            }
+        },
+        "queryRef": f"{m.table}.{name}",
+        "nativeQueryRef": name,
+    }
+
+
+def _column_proj(ref: str, active: bool = False) -> dict[str, Any]:
+    match = _COL_REF_RE.match(ref)
+    if not match:
+        raise ValueError(f"Invalid column reference {ref!r} — expected Table[Column]")
+    table, col = match.group(1), match.group(2)
+    proj: dict[str, Any] = {
+        "field": {
+            "Column": {
+                "Expression": {"SourceRef": {"Entity": table}},
+                "Property": col,
+            }
+        },
+        "queryRef": f"{table}.{col}",
+        "nativeQueryRef": col,
+    }
+    if active:
+        proj["active"] = True
+    return proj
