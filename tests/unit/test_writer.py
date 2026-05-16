@@ -98,7 +98,8 @@ def test_pages_json_single_page(tmp_path: Path, sample_visuals: list[dict[str, A
 def test_page_json_dimensions(tmp_path: Path, sample_visuals: list[dict[str, Any]]) -> None:
     write_report(visuals=sample_visuals, report_name="TestReport", output_dir=tmp_path)
     pages_dir = tmp_path / "TestReport.Report" / "definition" / "pages"
-    page_guid = next(p for p in pages_dir.iterdir() if p.is_dir()).name
+    pages_content = json.loads((pages_dir / "pages.json").read_text())
+    page_guid = pages_content["pageOrder"][0]
     content = json.loads((pages_dir / page_guid / "page.json").read_text())
     assert content["height"] == 720
     assert content["width"] == 1280
@@ -108,7 +109,8 @@ def test_page_json_dimensions(tmp_path: Path, sample_visuals: list[dict[str, Any
 def test_visual_json_files_created(tmp_path: Path, sample_visuals: list[dict[str, Any]]) -> None:
     write_report(visuals=sample_visuals, report_name="TestReport", output_dir=tmp_path)
     pages_dir = tmp_path / "TestReport.Report" / "definition" / "pages"
-    page_guid = next(p for p in pages_dir.iterdir() if p.is_dir()).name
+    pages_content = json.loads((pages_dir / "pages.json").read_text())
+    page_guid = pages_content["pageOrder"][0]
     visual_files = list((pages_dir / page_guid / "visuals").glob("*/visual.json"))
     assert len(visual_files) == 2
 
@@ -118,7 +120,8 @@ def test_visual_json_guid_used_as_folder_name(
 ) -> None:
     write_report(visuals=sample_visuals, report_name="TestReport", output_dir=tmp_path)
     pages_dir = tmp_path / "TestReport.Report" / "definition" / "pages"
-    page_guid = next(p for p in pages_dir.iterdir() if p.is_dir()).name
+    pages_content = json.loads((pages_dir / "pages.json").read_text())
+    page_guid = pages_content["pageOrder"][0]
     visuals_dir = pages_dir / page_guid / "visuals"
     folder_names = {p.name for p in visuals_dir.iterdir() if p.is_dir()}
     assert "abcd1234ef5678901234" in folder_names
