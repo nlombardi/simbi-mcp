@@ -44,7 +44,14 @@ class VisualNode:
 
     @property
     def visual_type(self) -> VisualType:
-        return VisualType(self.attrs["data-pbi"])
+        raw = self.attrs.get("data-pbi", "")
+        try:
+            return VisualType(raw)
+        except ValueError:
+            raise ValueError(
+                f"VisualNode has invalid data-pbi value {raw!r}. "
+                f"Valid types: {[v.value for v in VisualType]}"
+            ) from None
 
 
 async def extract_visuals(html_path: Path) -> list[VisualNode]:
@@ -57,12 +64,12 @@ async def extract_visuals(html_path: Path) -> list[VisualNode]:
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(channel="chrome")
-        context = await browser.new_context(viewport=_VIEWPORT)
-        page = await context.new_page()
-        await page.goto(html_path.as_uri())
-        await page.wait_for_load_state("networkidle")
-        raw: list[dict[str, Any]] = await page.evaluate(_JS_EXTRACT)
-        await browser.close()
+        async with browser:
+            context = await browser.new_context(viewport=_VIEWPORT)
+            page = await context.new_page()
+            await page.goto(html_path.as_uri())
+            await page.wait_for_load_state("networkidle")
+            raw: list[dict[str, Any]] = await page.evaluate(_JS_EXTRACT)
 
     if not raw:
         raise RuntimeError(f"No [data-pbi] elements found in {html_path}")
@@ -77,7 +84,7 @@ def _parse_js_nodes(raw: list[dict[str, Any]]) -> list[VisualNode]:
             y=float(node["y"]),
             width=float(node["width"]),
             height=float(node["height"]),
-            attrs=dict(node["data"]),
+            attrs={k: str(v) for k, v in node["data"].items()},
         )
         for node in raw
     ]
