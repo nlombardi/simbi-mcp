@@ -1,4 +1,10 @@
 """Unit tests for _parse_js_nodes — no browser required."""
+from __future__ import annotations
+
+from dataclasses import FrozenInstanceError
+
+import pytest
+
 from simbi_mcp.mockup.annotations import VisualType
 from simbi_mcp.pbir.extractor import VisualNode, _parse_js_nodes
 
@@ -79,8 +85,12 @@ def test_parse_js_nodes_all_attrs_preserved() -> None:
 
 def test_visual_node_is_frozen() -> None:
     node = VisualNode(x=0, y=0, width=100, height=100, attrs={"data-pbi": "card"})
-    try:
+    with pytest.raises(FrozenInstanceError):
         node.x = 99  # type: ignore[misc]
-        raise AssertionError("Should have raised FrozenInstanceError")
-    except (AssertionError, Exception):
-        pass
+
+
+def test_parse_js_nodes_invalid_visual_type_raises_on_access() -> None:
+    raw = [{"x": 0, "y": 0, "width": 100, "height": 100, "data": {"data-pbi": "pieChart"}}]
+    nodes = _parse_js_nodes(raw)
+    with pytest.raises(ValueError, match="pieChart"):
+        _ = nodes[0].visual_type
