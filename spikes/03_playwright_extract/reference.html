@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Reference Dashboard</title>
+  <style>
+    html, body { margin: 0; padding: 0; }
+    /* Minimal inline Tailwind equivalents — CDN unavailable offline */
+    body { background-color: #f8fafc; padding: 24px; box-sizing: border-box; }
+    .grid { display: grid; }
+    .grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .gap-4 { gap: 16px; }
+    .col-span-3 { grid-column: span 3 / span 3; }
+    .rounded-xl { border-radius: 12px; }
+    .p-6 { padding: 24px; }
+    .bg-white { background-color: #ffffff; }
+    .shadow { box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1); }
+    .text-sm { font-size: 14px; line-height: 20px; }
+    .text-gray-500 { color: #6b7280; }
+    .text-3xl { font-size: 30px; line-height: 36px; }
+    .font-bold { font-weight: 700; }
+    .h-64 { height: 256px; }
+    .bg-slate-50 { background-color: #f8fafc; }
+  </style>
+</head>
+<body class="bg-slate-50 p-6">
+  <div class="grid grid-cols-3 gap-4">
+    <div data-pbi="card"
+         data-pbi-measure="Total Revenue"
+         class="rounded-xl p-6 bg-white shadow">
+      <div class="text-sm text-gray-500">Revenue</div>
+      <div class="text-3xl font-bold">$1.2M</div>
+    </div>
+    <div data-pbi="card"
+         data-pbi-measure="Order Count"
+         class="rounded-xl p-6 bg-white shadow">
+      <div class="text-sm text-gray-500">Orders</div>
+      <div class="text-3xl font-bold">847</div>
+    </div>
+    <div data-pbi="slicer"
+         data-pbi-field="Date[Year]"
+         class="rounded-xl p-6 bg-white shadow">
+      <div class="text-sm text-gray-500">Year</div>
+    </div>
+    <div data-pbi="barChart"
+         data-pbi-axis="Product[Category]"
+         data-pbi-values="Total Revenue"
+         class="col-span-3 h-64 bg-white rounded-xl shadow"></div>
+  </div>
+</body>
+</html>
