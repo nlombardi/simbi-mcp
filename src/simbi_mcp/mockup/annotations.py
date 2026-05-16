@@ -104,3 +104,7 @@ Slicers:
 
 Do NOT use Tailwind classes or inline styles. Use only classes from this list.
 """
+
+# Attribute-role sets used by the validator — single source of truth.
+MEASURE_ATTRS: frozenset[str] = frozenset({"data-pbi-measure", "data-pbi-values"})
+COLUMN_REF_ATTRS: frozenset[str] = frozenset({"data-pbi-axis", "data-pbi-field", "data-pbi-series"})

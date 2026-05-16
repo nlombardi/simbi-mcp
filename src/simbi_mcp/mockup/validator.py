@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from html.parser import HTMLParser
 
-from simbi_mcp.mockup.annotations import VISUAL_ATTRS, VisualType
+from simbi_mcp.mockup.annotations import COLUMN_REF_ATTRS, MEASURE_ATTRS, VISUAL_ATTRS, VisualType
 from simbi_mcp.types import ModelSchema
 
 _COL_REF_RE = re.compile(r"^(.+)\[(.+)\]$")
@@ -35,7 +35,9 @@ class _AnnotationCollector(HTMLParser):
 def validate_mockup(html: str, schema: ModelSchema) -> None:
     """Parse html and validate every data-pbi element against schema.
 
-    Raises ValidationError describing the first problem found.
+    Raises ValidationError on the first problem found. Stops at the first
+    failure — callers that need all errors should call validate_mockup inside
+    a loop with corrected HTML between iterations.
     """
     collector = _AnnotationCollector()
     collector.feed(html)
@@ -66,13 +68,11 @@ def _validate_node(attrs: dict[str, str], schema: ModelSchema) -> None:
                 f"Visual {raw_type!r} is missing required attribute {req!r}"
             )
 
-    # Validate measure references
-    for attr in ("data-pbi-measure", "data-pbi-values"):
+    for attr in MEASURE_ATTRS:
         if attr in attrs:
             _check_measure(attrs[attr], schema, attr)
 
-    # Validate column references (Table[Column] format)
-    for attr in ("data-pbi-axis", "data-pbi-field", "data-pbi-series"):
+    for attr in COLUMN_REF_ATTRS:
         if attr in attrs:
             _check_column_ref(attrs[attr], schema, attr)
 

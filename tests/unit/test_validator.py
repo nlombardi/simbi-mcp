@@ -47,7 +47,7 @@ def test_valid_dashboard_passes(schema: ModelSchema, fixtures_html: Path) -> Non
 
 def test_invalid_measures_raises(schema: ModelSchema, fixtures_html: Path) -> None:
     html = (fixtures_html / "invalid_measures.html").read_text()
-    with pytest.raises(ValidationError, match="Hallucinated KPI"):
+    with pytest.raises(ValidationError, match="unknown measure"):
         validate_mockup(html, schema)
 
 
@@ -58,7 +58,6 @@ def test_unknown_visual_type_raises(schema: ModelSchema) -> None:
 
 
 def test_missing_required_attribute_raises(schema: ModelSchema) -> None:
-    # card missing data-pbi-measure
     html = '<div data-pbi="card"></div>'
     with pytest.raises(ValidationError, match="data-pbi-measure"):
         validate_mockup(html, schema)
@@ -102,7 +101,7 @@ def test_empty_html_raises(schema: ModelSchema) -> None:
 def test_table_visual_validates_each_column(schema: ModelSchema) -> None:
     html = (
         '<div data-pbi="table" '
-        'data-pbi-columns="Total Revenue,HallucinatedMeasure"></div>'
+        'data-pbi-columns="HallucinatedMeasure,Total Revenue"></div>'
     )
     with pytest.raises(ValidationError, match="HallucinatedMeasure"):
         validate_mockup(html, schema)
