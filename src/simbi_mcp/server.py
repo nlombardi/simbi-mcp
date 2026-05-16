@@ -1,4 +1,4 @@
-"""SimBI MCP server — exposes the three pipeline phases as MCP tools.
+"""SimBI MCP server — exposes Phase 1-3 pipelines as MCP tools.
 
 Tools (typical call order):
   parse_schema            TMDL str → ModelSchema JSON
@@ -8,6 +8,7 @@ Tools (typical call order):
 """
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 
@@ -49,7 +50,7 @@ def parse_schema(tmdl: str) -> str:
 
 
 @mcp.tool()
-def create_dashboard_mockup(prompt: str, schema_json: str) -> str:
+async def create_dashboard_mockup(prompt: str, schema_json: str) -> str:
     """Generate an annotated HTML dashboard mockup from a schema.
 
     prompt: natural language description of the desired dashboard.
@@ -58,7 +59,7 @@ def create_dashboard_mockup(prompt: str, schema_json: str) -> str:
     """
     schema = ModelSchema.model_validate_json(schema_json)
     client = _anthropic_client()
-    return _generate_mockup(prompt=prompt, schema=schema, client=client)
+    return await asyncio.to_thread(_generate_mockup, prompt=prompt, schema=schema, client=client)
 
 
 @mcp.tool()
