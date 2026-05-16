@@ -5,6 +5,8 @@ Uses the existing tests/fixtures/html/valid_dashboard.html fixture (4 data-pbi e
 
 Run with: uv run pytest -m integration -v
 """
+from __future__ import annotations
+
 import json
 from pathlib import Path
 
