@@ -21,6 +21,9 @@ dev = [
     "mypy>=1.10",
 ]
 
+[project.scripts]
+simbi-mcp = "simbi_mcp.server:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
