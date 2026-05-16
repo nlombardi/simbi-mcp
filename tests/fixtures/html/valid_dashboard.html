@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8" /><title>Test</title>
+<link rel="stylesheet" href="dashboard.css" /></head>
+<body class="db-page">
+  <div class="db-grid">
+    <div data-pbi="card" data-pbi-measure="Total Revenue" class="db-card db-col-1">
+      <div class="db-label">Revenue</div>
+      <div class="db-value">$1.2M</div>
+    </div>
+    <div data-pbi="card" data-pbi-measure="Order Count" class="db-card db-col-1">
+      <div class="db-label">Orders</div>
+      <div class="db-value">847</div>
+    </div>
+    <div data-pbi="slicer" data-pbi-field="sales[Region]" class="db-card db-col-1">
+      <div class="db-label">Region</div>
+      <div class="db-slicer-items">
+        <span class="db-pill active">All</span>
+      </div>
+    </div>
+    <div data-pbi="columnChart"
+         data-pbi-axis="sales[Region]"
+         data-pbi-values="Total Revenue"
+         class="db-card db-col-3">
+      <div class="db-chart-area">Column Chart</div>
+    </div>
+  </div>
+</body>
+</html>
