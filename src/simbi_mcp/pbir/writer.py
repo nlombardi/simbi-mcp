@@ -109,14 +109,20 @@ def write_report(
         },
     )
 
-    for visual in visuals:
+    for i, visual in enumerate(visuals):
+        try:
+            visual_name: str = visual["name"]
+        except KeyError as exc:
+            raise ValueError(
+                f"visual dict at index {i} is missing required key 'name'"
+            ) from exc
         _write_json(
             report_dir
             / "definition"
             / "pages"
             / page_guid
             / "visuals"
-            / visual["name"]
+            / visual_name
             / "visual.json",
             visual,
         )
