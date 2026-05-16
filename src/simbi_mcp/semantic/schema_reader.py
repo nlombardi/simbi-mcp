@@ -86,6 +86,7 @@ def parse_tmdl_schema(tmdl: str) -> ModelSchema:
     tables: list[_TableAccumulator] = []
     current: _TableAccumulator | None = None
     in_partition = False
+    partition_depth = 0
 
     for raw_line in tmdl.splitlines():
         line = raw_line.rstrip()
@@ -99,15 +100,18 @@ def parse_tmdl_schema(tmdl: str) -> ModelSchema:
         ):
             continue
 
-        # Partition block — skip until we see a non-partition top-level line
+        # Partition block — skip content until indentation returns to partition level.
+        # Tracks depth so measures/columns after a partition are not lost.
         if current and _PARTITION_RE.match(line):
+            partition_depth = len(line) - len(line.lstrip("\t"))
             in_partition = True
             continue
         if in_partition:
-            # Partition content is indented; a new non-indented line ends it
-            if line.startswith("\t"):
+            current_depth = len(line) - len(line.lstrip("\t"))
+            if current_depth > partition_depth:
                 continue
             in_partition = False
+            # Fall through — process this line normally
 
         # New table definition
         m = _TABLE_RE.match(line)
