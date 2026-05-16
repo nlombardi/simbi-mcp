@@ -104,7 +104,7 @@ async def generate_dashboard(
     """
     schema = parse_tmdl_schema(tmdl)
     client = _anthropic_client()
-    html = _generate_mockup(prompt=prompt, schema=schema, client=client)
+    html = await asyncio.to_thread(_generate_mockup, prompt=prompt, schema=schema, client=client)
     report_dir = await emit_pbir(
         html=html,
         schema=schema,
