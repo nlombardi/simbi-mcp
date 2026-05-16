@@ -160,3 +160,25 @@ def test_table_visual_type_is_tableEx(schema: ModelSchema) -> None:
 def test_drill_filter_always_true(schema: ModelSchema) -> None:
     result = build_visual_json(_card_node(), z_order=0, schema=schema)
     assert result["visual"]["drillFilterOtherVisuals"] is True
+
+
+def test_unknown_measure_raises(schema: ModelSchema) -> None:
+    node = VisualNode(
+        x=0, y=0, width=400, height=104,
+        attrs={"data-pbi": "card", "data-pbi-measure": "No Such Measure"},
+    )
+    with pytest.raises(KeyError, match="No Such Measure"):
+        build_visual_json(node, z_order=0, schema=schema)
+
+
+def test_invalid_column_ref_raises(schema: ModelSchema) -> None:
+    node = VisualNode(
+        x=0, y=120, width=1232, height=400,
+        attrs={
+            "data-pbi": "columnChart",
+            "data-pbi-axis": "NotAValidRef",
+            "data-pbi-values": "Total Revenue",
+        },
+    )
+    with pytest.raises(ValueError, match="Invalid column reference"):
+        build_visual_json(node, z_order=0, schema=schema)
