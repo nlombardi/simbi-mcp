@@ -9,9 +9,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from playwright.async_api import ViewportSize
+
 from simbi_mcp.mockup.annotations import VisualType
 
-_VIEWPORT = {"width": 1280, "height": 720}
+_VIEWPORT: ViewportSize = {"width": 1280, "height": 720}
 
 _JS_EXTRACT = """
 () => {
@@ -60,7 +62,7 @@ async def extract_visuals(html_path: Path) -> list[VisualNode]:
     dashboard.css must be in html_path.parent before this is called.
     Raises RuntimeError if no data-pbi elements are found.
     """
-    from playwright.async_api import async_playwright  # type: ignore[import-not-found]
+    from playwright.async_api import async_playwright
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(channel="chrome")
