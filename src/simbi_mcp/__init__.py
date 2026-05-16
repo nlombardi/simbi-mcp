@@ -1,2 +1,3 @@
-def main() -> None:
-    print("Hello from simbi-mcp!")
+from simbi_mcp.server import main
+
+__all__ = ["main"]

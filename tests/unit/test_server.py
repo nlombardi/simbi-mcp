@@ -68,3 +68,9 @@ def test_anthropic_client_missing_key_raises(monkeypatch: pytest.MonkeyPatch) ->
 
 def test_mcp_server_name() -> None:
     assert mcp.name == "SimBI"
+
+
+def test_main_is_importable_from_package() -> None:
+    from simbi_mcp import main
+    from simbi_mcp.server import main as server_main
+    assert main is server_main
