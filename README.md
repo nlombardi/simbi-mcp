@@ -91,55 +91,107 @@ Output: ModelSchema JSON string
 
 ### `emit_report`
 
-Renders an annotated HTML mockup in Chrome, extracts visual bounding boxes, and writes a complete Power BI `.pbip` Report folder.
+Renders an annotated HTML mockup in Chrome, extracts visual bounding boxes, and writes a complete `.pbip` project into `output_dir`.
 
 ```
 Input:  html: str, schema_json: str, report_name: str, output_dir: str
-Output: absolute path to <report_name>.Report folder
+Output: absolute path to <report_name>.pbip  ← open this in Power BI Desktop
 Needs:  system Chrome
 ```
 
+`output_dir` should be a dedicated project folder (e.g. `C:/Reports/SalesDashboard/`). Three sibling artifacts are written there: `<name>.pbip`, `<name>.Report/`, and `<name>.SemanticModel/` (stub generated from schema, skipped if folder already exists).
+
 ## End-to-end usage
 
-### Standalone (no MS Power BI MCP needed)
-
-SimBI is self-contained. Just describe your data and ask Claude to build the report:
+`emit_report` writes three sibling files into `output_dir`:
 
 ```
-Build me a sales dashboard for this CSV:
-  columns: Region, OrderDate, Revenue, Units, Category
-  measures needed: Total Revenue (SUM), Order Count (COUNTROWS), Avg Unit Price
-Save it to C:/Reports as "SalesDashboard"
+<output_dir>/
+  <name>.pbip                ← open this in Power BI Desktop
+  <name>.Report/             ← PBIR report layout
+  <name>.SemanticModel/      ← semantic model (real or stub, see paths below)
 ```
 
-Claude will:
-1. Read `simbi://annotation-vocabulary` to learn the annotation spec
-2. Call `parse_schema(tmdl)` with TMDL you or Claude describes from the CSV schema
-3. Generate the annotated HTML mockup
-4. Call `emit_report(...)`, which writes three sibling artifacts:
-   - `C:/Reports/SalesDashboard.pbip` ← **open this in Power BI Desktop**
-   - `C:/Reports/SalesDashboard.Report/` (PBIR layout)
-   - `C:/Reports/SalesDashboard.SemanticModel/` (BIM stub — no data, correct structure)
+`output_dir` should be a dedicated project folder — **not** the SimBI MCP repo. For example: `C:/Reports/SalesDashboard/`.
 
-The report opens in Power BI Desktop with the correct visual layout. The BIM stub defines tables and measures so PBI Desktop accepts the file; visuals show empty until you load real data.
+---
 
-### With the Microsoft Power BI MCP (real data)
+### Path 1 — SimBI builds everything (no MS Power BI MCP needed)
 
-When both MCPs are configured, Claude can build a semantic model with actual loaded data:
+SimBI generates the layout and a schema-correct semantic model stub from your CSV description. The stub has the right tables and measures but no loaded data — visuals open empty in PBI Desktop until you connect a data source.
 
+**Prompt Claude:**
 ```
-Build me a sales dashboard from revenue.csv, save to C:/Reports as "SalesDashboard"
+Build me a sales dashboard. My data is at C:/Data/sales.csv with columns:
+Region, OrderDate, Revenue, Units, Category
+
+Measures I want: Total Revenue (SUM of Revenue), Order Count (COUNTROWS),
+Avg Unit Price (Revenue / Units)
+
+Save the report to C:/Reports/SalesDashboard as "SalesDashboard"
 ```
 
-Claude will:
-1. Use the MS Power BI MCP to load `revenue.csv`, create DAX measures, and export TMDL
-2. In Power BI Desktop: **File → Save As → Power BI Project** to `C:/Reports/SalesDashboard` — this writes the real `C:/Reports/SalesDashboard.SemanticModel/` with actual data
-3. Read `simbi://annotation-vocabulary`
-4. Call `parse_schema(tmdl)` → schema JSON
-5. Generate the annotated HTML mockup
-6. Call `emit_report("SalesDashboard", "C:/Reports", ...)` — writes `.pbip` + `.Report/`, and **skips the SemanticModel stub** because the real one already exists
+**What Claude does:**
+1. Reads `simbi://annotation-vocabulary`
+2. Calls `parse_schema` with TMDL derived from your CSV description
+3. Generates the annotated HTML mockup in-context
+4. Calls `emit_report(report_name="SalesDashboard", output_dir="C:/Reports/SalesDashboard")`
 
-Result: a fully data-connected report you can open and refresh in Power BI Desktop.
+**Output:**
+```
+C:/Reports/SalesDashboard/
+  SalesDashboard.pbip        ← open this
+  SalesDashboard.Report/
+  SalesDashboard.SemanticModel/   ← stub: correct structure, no loaded data
+```
+
+---
+
+### Path 2 — MS Power BI MCP builds the semantic model, SimBI builds the report
+
+The MS Power BI MCP loads the CSV into Power BI Desktop and creates the real semantic model. SimBI then generates the report layout into the **same folder**. Because the SemanticModel already exists, SimBI skips the stub and the result is a fully data-connected report.
+
+**Step 1 — Let the MS Power BI MCP create and save the semantic model:**
+```
+Use the Power BI MCP to:
+1. Create a new project named "SalesDashboard" saved to C:/Reports/SalesDashboard
+2. Load C:/Data/sales.csv as the "sales" table
+3. Create measures: Total Revenue = SUM(sales[Revenue]),
+   Order Count = COUNTROWS(sales), Avg Unit Price = [Total Revenue] / SUM(sales[Units])
+4. Export the TMDL
+```
+
+After this step the MS MCP will have saved:
+```
+C:/Reports/SalesDashboard/
+  SalesDashboard.SemanticModel/   ← real model with loaded data
+```
+
+**Step 2 — Have SimBI generate the report into the same folder:**
+```
+Now use SimBI to build a sales dashboard report.
+Use the TMDL from the previous step.
+Save it to C:/Reports/SalesDashboard as "SalesDashboard"
+```
+
+**What Claude does:**
+1. Reads `simbi://annotation-vocabulary`
+2. Calls `parse_schema` with the TMDL from Step 1
+3. Generates the annotated HTML mockup in-context
+4. Calls `emit_report(report_name="SalesDashboard", output_dir="C:/Reports/SalesDashboard")`
+   — sees the existing `SalesDashboard.SemanticModel/` and skips the stub
+
+**Output:**
+```
+C:/Reports/SalesDashboard/
+  SalesDashboard.pbip             ← open this
+  SalesDashboard.Report/
+  SalesDashboard.SemanticModel/   ← real model, untouched
+```
+
+Open `SalesDashboard.pbip` in Power BI Desktop — visuals are connected and can be refreshed.
+
+---
 
 ### Smoke-test the server locally
 
