@@ -1,16 +1,16 @@
-"""PBIR folder writer — generates the full Report folder structure from visual dicts.
+"""PBIR folder writer — generates the full .pbip project structure from visual dicts.
 
-Writes all required files for a valid Power BI .pbip Report:
-  - definition.pbir (dataset reference)
-  - definition/version.json
-  - definition/report.json (static template)
-  - definition/pages/pages.json
-  - definition/pages/<page-guid>/page.json
-  - definition/pages/<page-guid>/visuals/<visual-guid>/visual.json (one per visual)
-  - StaticResources/SharedResources/BaseThemes/CY25SU10.json (bundled theme)
-
-The SemanticModel sibling folder is created by the MS MCP tools in Phase 1 —
-this writer only generates the Report side.
+Writes all required files for an openable Power BI .pbip project:
+  - <name>.pbip (project entry point)
+  - <name>.Report/definition.pbir (dataset reference)
+  - <name>.Report/definition/version.json
+  - <name>.Report/definition/report.json (static template)
+  - <name>.Report/definition/pages/pages.json
+  - <name>.Report/definition/pages/<page-guid>/page.json
+  - <name>.Report/definition/pages/<page-guid>/visuals/<visual-guid>/visual.json
+  - <name>.Report/StaticResources/SharedResources/BaseThemes/CY25SU10.json
+  - <name>.SemanticModel/definition.pbism (stub — generated from ModelSchema)
+  - <name>.SemanticModel/model.bim (empty-partition BIM model for PBI to open)
 """
 from __future__ import annotations
 
@@ -19,6 +19,8 @@ import shutil
 import uuid
 from pathlib import Path
 from typing import Any
+
+from simbi_mcp.types import ModelSchema
 
 _STATIC_DIR = Path(__file__).parent / "static"
 
@@ -63,6 +65,99 @@ _REPORT_JSON_TEMPLATE: dict[str, Any] = {
         "useDefaultAggregateDisplayName": True,
     },
 }
+
+
+_FORMAT_STRING: dict[str, str] = {
+    "currency": "\\$#,0.00",
+    "integer": "#,0",
+    "percentage": "0.00%",
+}
+
+
+def write_semantic_model_stub(
+    schema: ModelSchema,
+    report_name: str,
+    output_dir: Path,
+) -> Path:
+    """Write a minimal SemanticModel folder from a ModelSchema.
+
+    Creates <report_name>.SemanticModel/ with definition.pbism and model.bim.
+    The model has the correct table/column/measure structure but empty data
+    partitions, so Power BI Desktop can open and display the report layout.
+    Returns the path to the created SemanticModel folder.
+    """
+    model_dir = output_dir / f"{report_name}.SemanticModel"
+    _write_json(model_dir / "definition.pbism", {"version": "4.2", "settings": {}})
+
+    tables = []
+    for table in schema.tables:
+        columns = [
+            {
+                "name": col,
+                "dataType": "string",
+                "sourceColumn": col,
+                "summarizeBy": "none",
+            }
+            for col in table.columns
+        ]
+        measures = [
+            {
+                "name": m.name,
+                "expression": m.expression,
+                "formatString": _FORMAT_STRING.get(m.return_type, "#,0.##"),
+            }
+            for m in schema.measures
+            if m.table == table.name
+        ]
+        col_list = ", ".join(f'"{c}"' for c in table.columns)
+        partition_expr = [
+            "let",
+            f"    Source = Table.FromRows({{}}, {{{col_list}}})",
+            "in",
+            "    Source",
+        ]
+        tables.append(
+            {
+                "name": table.name,
+                "columns": columns,
+                "measures": measures,
+                "partitions": [
+                    {
+                        "name": table.name,
+                        "mode": "import",
+                        "source": {"type": "m", "expression": partition_expr},
+                    }
+                ],
+            }
+        )
+
+    relationships = [
+        {
+            "name": f"rel_{i}",
+            "fromTable": r.from_table,
+            "fromColumn": r.from_column,
+            "toTable": r.to_table,
+            "toColumn": r.to_column,
+        }
+        for i, r in enumerate(schema.relationships)
+    ]
+
+    bim = {
+        "compatibilityLevel": 1550,
+        "model": {
+            "culture": "en-US",
+            "dataAccessOptions": {
+                "legacyRedirects": True,
+                "returnErrorValuesAsNull": True,
+            },
+            "defaultPowerBIDataSourceVersion": "powerBI_V3",
+            "sourceQueryCulture": "en-US",
+            "tables": tables,
+            "relationships": relationships,
+        },
+    }
+    _write_json(model_dir / "model.bim", bim)
+    return model_dir
 
 
 def write_report(
@@ -132,6 +227,15 @@ def write_report(
     )
     theme_dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy(_STATIC_DIR / "CY25SU10.json", theme_dest)
+
+    _write_json(
+        output_dir / f"{report_name}.pbip",
+        {
+            "version": "1.0",
+            "artifacts": [{"report": {"path": f"{report_name}.Report"}}],
+            "settings": {"enableAutoRecovery": True},
+        },
+    )
 
     return report_dir
 
