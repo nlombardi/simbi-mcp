@@ -96,25 +96,43 @@ Output: absolute path to <report_name>.Report folder
 Needs:  system Chrome
 ```
 
-## Typical Claude session
+## End-to-end usage
 
-With both SimBI and the Microsoft Power BI MCP configured, a session looks like:
+### Full flow (CSV → Power BI report)
+
+With both SimBI and the Microsoft Power BI MCP configured, just ask Claude:
 
 ```
-User: Build me a sales dashboard from revenue.csv
-
-Claude:
-1. [MS Power BI MCP] Creates table from revenue.csv
-2. [MS Power BI MCP] Loads data and creates DAX measures
-3. [MS Power BI MCP] Exports TMDL schema
-
-4. [SimBI resource] reads simbi://annotation-vocabulary → learns annotation spec
-5. [SimBI] parse_schema(tmdl) → schema JSON
-6. [Claude generates HTML in-context using schema + annotation vocabulary]
-7. [SimBI] emit_report(html, schema_json, "SalesDashboard", "C:/Reports") → folder path
-
-"Done! Open C:/Reports/SalesDashboard.Report in Power BI Desktop."
+Build me a sales dashboard from revenue.csv
 ```
+
+Claude will:
+1. Use the MS Power BI MCP to load the CSV, create DAX measures, and export TMDL
+2. Read `simbi://annotation-vocabulary` to learn the annotation spec and CSS catalog
+3. Call `parse_schema(tmdl)` to get a structured schema
+4. Generate the annotated HTML mockup itself using the schema and vocabulary
+5. Call `emit_report(html, schema_json, "SalesDashboard", "C:/Reports")`
+
+Open the resulting `C:/Reports/SalesDashboard.Report` folder in Power BI Desktop.
+
+### If you already have TMDL
+
+Skip the MS MCP step by pasting your TMDL directly:
+
+```
+Here's my TMDL: <paste>
+Generate a sales dashboard and save it to C:/Reports as "SalesDashboard"
+```
+
+Claude reads the vocabulary, parses the schema, writes the HTML, and emits the report.
+
+### Smoke-test the server locally
+
+```bash
+uv run simbi-mcp
+```
+
+The server starts silently (stdio protocol). Ctrl+C to exit. If it starts without errors the entry point and imports are working.
 
 ## Development
 
