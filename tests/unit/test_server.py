@@ -1,13 +1,9 @@
-"""Unit tests for SimBI MCP server tools — no API keys, no browser required."""
+"""Unit tests for SimBI MCP server tools and resources — no API keys, no browser required."""
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock
 
-import pytest
-from pytest_mock import MockerFixture
-
-from simbi_mcp.server import _anthropic_client, mcp
+from simbi_mcp.server import mcp
 from simbi_mcp.types import ModelSchema
 
 _SALES_TMDL = (
@@ -21,10 +17,6 @@ _SALES_TMDL = (
     "\tcolumn OrderDate\n"
     "\t\tdataType: DateTime\n"
 )
-
-
-def _empty_schema_json() -> str:
-    return ModelSchema(tables=[], measures=[], relationships=[]).model_dump_json()
 
 
 async def test_parse_schema_returns_measures() -> None:
@@ -50,20 +42,26 @@ async def test_parse_schema_result_roundtrips_to_model_schema() -> None:
     assert schema.has_measure("Total Revenue")
 
 
-async def test_create_dashboard_mockup_returns_html(mocker: MockerFixture) -> None:
-    mocker.patch("simbi_mcp.server._generate_mockup", return_value="<html>mock</html>")
-    mocker.patch("simbi_mcp.server._anthropic_client", return_value=MagicMock())
-    _, result = await mcp.call_tool(
-        "create_dashboard_mockup",
-        {"prompt": "show sales", "schema_json": _empty_schema_json()},
-    )
-    assert result["result"] == "<html>mock</html>"
+async def test_annotation_vocabulary_resource_is_readable() -> None:
+    results = list(await mcp.read_resource("simbi://annotation-vocabulary"))
+    assert results, "resource returned no content"
+    text = "".join(r.content for r in results)
+    assert "data-pbi" in text
+    assert "ANNOTATION VOCABULARY" in text
 
 
-def test_anthropic_client_missing_key_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY"):
-        _anthropic_client()
+async def test_annotation_vocabulary_contains_all_visual_types() -> None:
+    results = list(await mcp.read_resource("simbi://annotation-vocabulary"))
+    text = "".join(r.content for r in results)
+    for visual_type in ("card", "columnChart", "lineChart", "slicer", "table"):
+        assert visual_type in text, f"Missing visual type: {visual_type}"
+
+
+async def test_annotation_vocabulary_contains_css_catalog() -> None:
+    results = list(await mcp.read_resource("simbi://annotation-vocabulary"))
+    text = "".join(r.content for r in results)
+    assert "AVAILABLE CSS CLASSES" in text
+    assert "db-grid" in text
 
 
 def test_mcp_server_name() -> None:
