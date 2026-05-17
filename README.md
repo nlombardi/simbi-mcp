@@ -125,20 +125,21 @@ The report opens in Power BI Desktop with the correct visual layout. The BIM stu
 
 ### With the Microsoft Power BI MCP (real data)
 
-When both MCPs are configured, Claude can load and connect actual CSV data:
+When both MCPs are configured, Claude can build a semantic model with actual loaded data:
 
 ```
-Build me a sales dashboard from revenue.csv
+Build me a sales dashboard from revenue.csv, save to C:/Reports as "SalesDashboard"
 ```
 
 Claude will:
 1. Use the MS Power BI MCP to load `revenue.csv`, create DAX measures, and export TMDL
-2. Read `simbi://annotation-vocabulary`
-3. Call `parse_schema(tmdl)` → schema JSON
-4. Generate the annotated HTML mockup
-5. Call `emit_report(...)` → writes `.pbip` + `.Report/` + `.SemanticModel/`
+2. In Power BI Desktop: **File → Save As → Power BI Project** to `C:/Reports/SalesDashboard` — this writes the real `C:/Reports/SalesDashboard.SemanticModel/` with actual data
+3. Read `simbi://annotation-vocabulary`
+4. Call `parse_schema(tmdl)` → schema JSON
+5. Generate the annotated HTML mockup
+6. Call `emit_report("SalesDashboard", "C:/Reports", ...)` — writes `.pbip` + `.Report/`, and **skips the SemanticModel stub** because the real one already exists
 
-In this case the SemanticModel stub can be replaced with the real model the MS MCP created, giving you a fully data-connected report.
+Result: a fully data-connected report you can open and refresh in Power BI Desktop.
 
 ### Smoke-test the server locally
 

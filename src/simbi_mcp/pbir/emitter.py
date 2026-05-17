@@ -54,5 +54,8 @@ async def emit_pbir(
         output_dir=output_dir,
         semantic_model_rel_path=semantic_model_rel_path,
     )
-    write_semantic_model_stub(schema, report_name, output_dir)
+    # Only generate the stub when no SemanticModel exists yet — preserves a real
+    # model written by the MS Power BI MCP or saved from Power BI Desktop.
+    if not (output_dir / f"{report_name}.SemanticModel").exists():
+        write_semantic_model_stub(schema, report_name, output_dir)
     return output_dir / f"{report_name}.pbip"
