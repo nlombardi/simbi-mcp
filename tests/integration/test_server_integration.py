@@ -41,7 +41,7 @@ _SALES_SCHEMA = ModelSchema(
 
 
 @pytest.mark.skipif(not _CHROME_EXE.exists(), reason="System Chrome not found")
-async def test_emit_report_creates_pbip_folder(tmp_path: Path) -> None:
+async def test_emit_report_returns_pbip_path(tmp_path: Path) -> None:
     html = (_FIXTURES_HTML / "valid_dashboard.html").read_text()
     schema_json = _SALES_SCHEMA.model_dump_json()
     _, result = await mcp.call_tool(
@@ -53,12 +53,36 @@ async def test_emit_report_creates_pbip_folder(tmp_path: Path) -> None:
             "output_dir": str(tmp_path),
         },
     )
-    report_dir = Path(result["result"])
-    assert report_dir == tmp_path / "TestDashboard.Report"
+    pbip = Path(result["result"])
+    assert pbip == tmp_path / "TestDashboard.pbip"
+    assert pbip.exists()
+    project = json.loads(pbip.read_text())
+    assert project["artifacts"][0]["report"]["path"] == "TestDashboard.Report"
+
+
+@pytest.mark.skipif(not _CHROME_EXE.exists(), reason="System Chrome not found")
+async def test_emit_report_creates_report_and_semantic_model(tmp_path: Path) -> None:
+    html = (_FIXTURES_HTML / "valid_dashboard.html").read_text()
+    schema_json = _SALES_SCHEMA.model_dump_json()
+    _, result = await mcp.call_tool(
+        "emit_report",
+        {
+            "html": html,
+            "schema_json": schema_json,
+            "report_name": "TestDashboard",
+            "output_dir": str(tmp_path),
+        },
+    )
+    report_dir = tmp_path / "TestDashboard.Report"
+    model_dir = tmp_path / "TestDashboard.SemanticModel"
     assert report_dir.is_dir()
     assert (report_dir / "definition.pbir").exists()
-    definition = json.loads((report_dir / "definition.pbir").read_text())
-    assert definition["datasetReference"]["byPath"]["path"] == "../TestDashboard.SemanticModel"
+    assert model_dir.is_dir()
+    assert (model_dir / "definition.pbism").exists()
+    assert (model_dir / "model.bim").exists()
+    bim = json.loads((model_dir / "model.bim").read_text())
+    table_names = [t["name"] for t in bim["model"]["tables"]]
+    assert "sales" in table_names
 
 
 @pytest.mark.skipif(not _CHROME_EXE.exists(), reason="System Chrome not found")
@@ -75,7 +99,7 @@ async def test_emit_report_correct_visual_count(tmp_path: Path) -> None:
             "output_dir": str(tmp_path),
         },
     )
-    report_dir = Path(result["result"])
+    report_dir = tmp_path / "TestDashboard.Report"
     pages_dir = report_dir / "definition" / "pages"
     pages_content = json.loads((pages_dir / "pages.json").read_text())
     page_guid = pages_content["pageOrder"][0]

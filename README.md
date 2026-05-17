@@ -9,7 +9,7 @@ SimBI chains three phases into two MCP tools and one resource:
 ```
 User prompt + CSV
       │
-      ▼  [MS Power BI MCP]
+      ▼  [MS Power BI MCP]  ← optional: provides a real data model
   Semantic model  ──→  TMDL string
       │
       ▼  parse_schema
@@ -19,10 +19,13 @@ User prompt + CSV
   Annotated HTML mockup  (data-pbi-* annotations)
       │
       ▼  emit_report
-  .pbip Report folder  (Playwright renders HTML → extracts bounding boxes → writes PBIR files)
+  <name>.pbip + <name>.Report/ + <name>.SemanticModel/
+  (Playwright renders HTML → extracts bounding boxes → writes PBIR files + BIM model stub)
 ```
 
-Claude orchestrates between the Microsoft Power BI MCP (to create the semantic model) and SimBI (to generate the report). SimBI handles phases 2 and 3; the MS MCP handles phase 1. Claude generates the HTML mockup itself using the annotation vocabulary exposed as an MCP resource — no nested API calls.
+Claude generates the HTML mockup itself using the annotation vocabulary exposed as an MCP resource. `emit_report` always produces a complete, openable `.pbip` project — a BIM model stub is generated from the schema so Power BI Desktop can open the file even without the MS Power BI MCP.
+
+When the MS Power BI MCP is also configured, it creates a real semantic model from the CSV (with actual loaded data). SimBI's stub is then a placeholder that can be replaced with the real model.
 
 ## Prerequisites
 
@@ -98,33 +101,44 @@ Needs:  system Chrome
 
 ## End-to-end usage
 
-### Full flow (CSV → Power BI report)
+### Standalone (no MS Power BI MCP needed)
 
-With both SimBI and the Microsoft Power BI MCP configured, just ask Claude:
+SimBI is self-contained. Just describe your data and ask Claude to build the report:
+
+```
+Build me a sales dashboard for this CSV:
+  columns: Region, OrderDate, Revenue, Units, Category
+  measures needed: Total Revenue (SUM), Order Count (COUNTROWS), Avg Unit Price
+Save it to C:/Reports as "SalesDashboard"
+```
+
+Claude will:
+1. Read `simbi://annotation-vocabulary` to learn the annotation spec
+2. Call `parse_schema(tmdl)` with TMDL you or Claude describes from the CSV schema
+3. Generate the annotated HTML mockup
+4. Call `emit_report(...)`, which writes three sibling artifacts:
+   - `C:/Reports/SalesDashboard.pbip` ← **open this in Power BI Desktop**
+   - `C:/Reports/SalesDashboard.Report/` (PBIR layout)
+   - `C:/Reports/SalesDashboard.SemanticModel/` (BIM stub — no data, correct structure)
+
+The report opens in Power BI Desktop with the correct visual layout. The BIM stub defines tables and measures so PBI Desktop accepts the file; visuals show empty until you load real data.
+
+### With the Microsoft Power BI MCP (real data)
+
+When both MCPs are configured, Claude can load and connect actual CSV data:
 
 ```
 Build me a sales dashboard from revenue.csv
 ```
 
 Claude will:
-1. Use the MS Power BI MCP to load the CSV, create DAX measures, and export TMDL
-2. Read `simbi://annotation-vocabulary` to learn the annotation spec and CSS catalog
-3. Call `parse_schema(tmdl)` to get a structured schema
-4. Generate the annotated HTML mockup itself using the schema and vocabulary
-5. Call `emit_report(html, schema_json, "SalesDashboard", "C:/Reports")`
+1. Use the MS Power BI MCP to load `revenue.csv`, create DAX measures, and export TMDL
+2. Read `simbi://annotation-vocabulary`
+3. Call `parse_schema(tmdl)` → schema JSON
+4. Generate the annotated HTML mockup
+5. Call `emit_report(...)` → writes `.pbip` + `.Report/` + `.SemanticModel/`
 
-Open the resulting `C:/Reports/SalesDashboard.Report` folder in Power BI Desktop.
-
-### If you already have TMDL
-
-Skip the MS MCP step by pasting your TMDL directly:
-
-```
-Here's my TMDL: <paste>
-Generate a sales dashboard and save it to C:/Reports as "SalesDashboard"
-```
-
-Claude reads the vocabulary, parses the schema, writes the HTML, and emits the report.
+In this case the SemanticModel stub can be replaced with the real model the MS MCP created, giving you a fully data-connected report.
 
 ### Smoke-test the server locally
 

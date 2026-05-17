@@ -58,8 +58,8 @@ async def emit_report(
     html: annotated HTML you generated using the simbi://annotation-vocabulary spec.
     schema_json: ModelSchema JSON from parse_schema.
     report_name: base name for the report, e.g. "SalesDashboard".
-    output_dir: directory where <report_name>.Report will be created.
-    Returns the absolute path to the created Report folder.
+    output_dir: directory where the project files will be created.
+    Returns the absolute path to <report_name>.pbip — open this in Power BI Desktop.
     """
     schema = ModelSchema.model_validate_json(schema_json)
     report_dir = await emit_pbir(

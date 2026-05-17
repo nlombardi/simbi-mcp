@@ -12,7 +12,7 @@ from pathlib import Path
 
 from simbi_mcp.pbir.extractor import extract_visuals
 from simbi_mcp.pbir.templates import build_visual_json
-from simbi_mcp.pbir.writer import write_report
+from simbi_mcp.pbir.writer import write_report, write_semantic_model_stub
 from simbi_mcp.types import ModelSchema
 
 _DASHBOARD_CSS = Path(__file__).parent.parent / "mockup" / "dashboard.css"
@@ -26,11 +26,14 @@ async def emit_pbir(
     output_dir: Path,
     semantic_model_rel_path: str | None = None,
 ) -> Path:
-    """Render html in system Chrome, extract annotations, write PBIR Report folder.
+    """Render html in system Chrome, extract annotations, write complete .pbip project.
 
-    The created folder is at output_dir/<report_name>.Report.
-    The SemanticModel sibling folder must already exist (created by Phase 1 / MS MCP).
-    Returns the path to the created Report folder.
+    Creates:
+      output_dir/<report_name>.pbip           (project entry point — open this in PBI Desktop)
+      output_dir/<report_name>.Report/        (PBIR report folder)
+      output_dir/<report_name>.SemanticModel/ (minimal BIM model stub)
+
+    Returns the path to the .pbip project file.
     """
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
@@ -45,9 +48,11 @@ async def emit_pbir(
         for i, node in enumerate(nodes)
     ]
 
-    return write_report(
+    write_report(
         visuals=visuals,
         report_name=report_name,
         output_dir=output_dir,
         semantic_model_rel_path=semantic_model_rel_path,
     )
+    write_semantic_model_stub(schema, report_name, output_dir)
+    return output_dir / f"{report_name}.pbip"

@@ -5,7 +5,8 @@ from typing import Any
 
 import pytest
 
-from simbi_mcp.pbir.writer import write_report
+from simbi_mcp.pbir.writer import write_report, write_semantic_model_stub
+from simbi_mcp.types import ModelMeasure, ModelSchema, ModelTable
 
 _VISUAL_SCHEMA = (
     "https://developer.microsoft.com/json-schemas/fabric/item/report"
@@ -153,3 +154,78 @@ def test_report_json_has_theme_collection(
     )
     assert content["themeCollection"]["baseTheme"]["name"] == "CY25SU10"
     assert "settings" in content
+
+
+def test_write_report_creates_pbip_file(
+    tmp_path: Path, sample_visuals: list[dict[str, Any]]
+) -> None:
+    write_report(visuals=sample_visuals, report_name="TestReport", output_dir=tmp_path)
+    pbip = tmp_path / "TestReport.pbip"
+    assert pbip.exists()
+    content = json.loads(pbip.read_text())
+    assert content["artifacts"][0]["report"]["path"] == "TestReport.Report"
+
+
+@pytest.fixture
+def sales_schema() -> ModelSchema:
+    return ModelSchema(
+        tables=[ModelTable(name="sales", columns=["Region", "OrderDate"])],
+        measures=[
+            ModelMeasure(
+                name="Total Revenue",
+                table="sales",
+                expression="SUM(sales[Revenue])",
+                return_type="currency",
+            ),
+        ],
+        relationships=[],
+    )
+
+
+def test_write_semantic_model_stub_creates_folder(
+    tmp_path: Path, sales_schema: ModelSchema
+) -> None:
+    result = write_semantic_model_stub(sales_schema, "TestReport", tmp_path)
+    assert result == tmp_path / "TestReport.SemanticModel"
+    assert result.is_dir()
+
+
+def test_write_semantic_model_stub_creates_pbism(
+    tmp_path: Path, sales_schema: ModelSchema
+) -> None:
+    write_semantic_model_stub(sales_schema, "TestReport", tmp_path)
+    pbism = tmp_path / "TestReport.SemanticModel" / "definition.pbism"
+    assert pbism.exists()
+    content = json.loads(pbism.read_text())
+    assert content["version"] == "4.2"
+
+
+def test_write_semantic_model_stub_creates_bim_with_tables(
+    tmp_path: Path, sales_schema: ModelSchema
+) -> None:
+    write_semantic_model_stub(sales_schema, "TestReport", tmp_path)
+    bim_path = tmp_path / "TestReport.SemanticModel" / "model.bim"
+    assert bim_path.exists()
+    bim = json.loads(bim_path.read_text())
+    table_names = [t["name"] for t in bim["model"]["tables"]]
+    assert "sales" in table_names
+
+
+def test_write_semantic_model_stub_includes_measures(
+    tmp_path: Path, sales_schema: ModelSchema
+) -> None:
+    write_semantic_model_stub(sales_schema, "TestReport", tmp_path)
+    bim = json.loads((tmp_path / "TestReport.SemanticModel" / "model.bim").read_text())
+    sales_table = next(t for t in bim["model"]["tables"] if t["name"] == "sales")
+    measure_names = [m["name"] for m in sales_table["measures"]]
+    assert "Total Revenue" in measure_names
+
+
+def test_write_semantic_model_stub_currency_format_string(
+    tmp_path: Path, sales_schema: ModelSchema
+) -> None:
+    write_semantic_model_stub(sales_schema, "TestReport", tmp_path)
+    bim = json.loads((tmp_path / "TestReport.SemanticModel" / "model.bim").read_text())
+    sales_table = next(t for t in bim["model"]["tables"] if t["name"] == "sales")
+    measure = next(m for m in sales_table["measures"] if m["name"] == "Total Revenue")
+    assert "$" in measure["formatString"]
