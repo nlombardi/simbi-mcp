@@ -27,23 +27,32 @@ mcp: FastMCP = FastMCP(
     "SimBI",
     instructions=(
         "Generate Power BI dashboards from natural language.\n\n"
-        "END-TO-END WORKFLOW (Power BI Desktop is the source of truth for the\n"
-        "data model — SimBI only writes the .Report folder):\n"
-        "  1. Build the semantic model in the live Power BI Desktop instance\n"
-        "     via the Power BI MCP (create tables, measures, relationships,\n"
-        "     calculated tables, etc.).\n"
-        "  2. **SYNC TMDL TO DISK** — call the Power BI MCP's\n"
-        "     database_operations.ExportToTmdlFolder with tmdlFolderPath set to\n"
-        "     `<project>/<Name>.SemanticModel/definition`. Without this step,\n"
-        "     model changes live only in PBI Desktop memory; reopening the\n"
-        "     .pbip will show none of your measures or relationships.\n"
-        "  3. Call SimBI.parse_schema with the same folder path (or any folder\n"
-        "     produced by ExportTMDL/ExportToTmdlFolder) to get the schema JSON.\n"
-        "  4. Generate annotated HTML using the schema and the vocabulary below.\n"
-        "  5. Call SimBI.validate_mockup_html to lint the HTML cheaply.\n"
-        "  6. Call SimBI.emit_report to write the .Report folder beside the .pbip.\n"
-        "  7. The user reloads the .pbip in Power BI Desktop and sees a complete\n"
-        "     dashboard with measures, relationships, and visuals all wired.\n\n"
+        "END-TO-END WORKFLOW — follow these steps IN ORDER:\n\n"
+        "  1. Open the .pbip file in Power BI Desktop.\n"
+        "  2. Use the Power BI MCP to build the semantic model (create tables,\n"
+        "     measures, relationships, calculated tables, refresh data, etc.).\n"
+        "  3. SYNC TMDL TO DISK — call Power BI MCP database_operations\n"
+        "     ExportToTmdlFolder, setting tmdlFolderPath to the project's\n"
+        "     <Name>.SemanticModel/definition folder. Without this step, all\n"
+        "     model changes exist only in Power BI Desktop memory and will be\n"
+        "     lost when the file is reopened.\n"
+        "  4. CLOSE Power BI Desktop (or at minimum close the file). This is\n"
+        "     MANDATORY before calling emit_report. Power BI Desktop caches the\n"
+        "     Report in memory while the file is open — any files SimBI writes\n"
+        "     to the .Report folder will be ignored until a fresh open.\n"
+        "  5. Call SimBI.parse_schema with the SemanticModel/definition folder\n"
+        "     path from step 3 to get the schema JSON.\n"
+        "  6. Generate annotated HTML using the schema and the vocabulary below.\n"
+        "     IMPORTANT: every visual element MUST have non-zero CSS dimensions.\n"
+        "     Use the dashboard.css classes (db-page, db-grid, db-card,\n"
+        "     db-chart-area, etc.) — SimBI renders the HTML in headless Chrome\n"
+        "     to extract bounding boxes, and a 0×0 element produces a visual\n"
+        "     Power BI Desktop silently discards.\n"
+        "  7. Call SimBI.validate_mockup_html to lint the HTML cheaply.\n"
+        "  8. Call SimBI.emit_report to write the .Report folder beside the .pbip.\n"
+        "  9. Open the .pbip file fresh in Power BI Desktop. Both the semantic\n"
+        "     model (measures, relationships, Calendar table) and the report\n"
+        "     visuals are now read from disk on cold open.\n\n"
         + ANNOTATION_SPEC_TEXT
         + "\n"
         + CSS_CLASS_CATALOG
@@ -167,11 +176,25 @@ async def emit_report(
 
     Returns: absolute path to the .Report folder that was written.
 
+    PREREQUISITE — Power BI Desktop MUST be closed before calling this tool:
+      Power BI Desktop caches the Report in memory while the file is open.
+      Any files SimBI writes to the .Report folder while the file is open will
+      be silently ignored when the user reloads — visuals will appear missing.
+      The correct sequence is: (1) use Power BI MCP to build the model,
+      (2) ExportToTmdlFolder → SemanticModel/definition, (3) CLOSE Power BI
+      Desktop, (4) call this tool, (5) open the .pbip fresh.
+
     PREREQUISITE — the .pbip MUST already exist before calling this tool:
       Power BI Desktop or the Power BI MCP creates the .pbip and its
       .SemanticModel (which holds the live data model). SimBI ONLY contributes
       the .Report/ folder. If no .pbip exists at pbip_path, this tool raises
       ValueError telling you to create it first — do not invent a new path.
+
+    HTML SIZING — every visual element MUST have non-zero CSS dimensions:
+      SimBI renders the HTML in headless Chrome to extract bounding boxes.
+      A visual element with zero width/height produces an error. Use the
+      dashboard.css classes (db-page, db-grid, db-card, db-chart-area, etc.)
+      to ensure every element has a real computed size.
 
     VOCABULARY — every visual MUST be a single element tagged like this:
 

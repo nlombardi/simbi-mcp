@@ -76,7 +76,24 @@ async def extract_visuals(html_path: Path) -> list[VisualNode]:
     if not raw:
         raise RuntimeError(f"No [data-pbi] elements found in {html_path}")
 
-    return _parse_js_nodes(raw)
+    nodes = _parse_js_nodes(raw)
+
+    zero_size = [n for n in nodes if n.width == 0 and n.height == 0]
+    if zero_size:
+        types = [n.attrs.get("data-pbi", "?") for n in zero_size]
+        raise RuntimeError(
+            f"{len(zero_size)} of {len(nodes)} data-pbi element(s) have zero "
+            f"width/height after rendering ({types}). Power BI Desktop will "
+            f"silently discard zero-size visuals.\n\n"
+            f"Fix: wrap each visual element in a container that gives it "
+            f"explicit dimensions. Use the dashboard.css classes — for example:\n"
+            f'  <div class="db-card" data-pbi="card" data-pbi-measure="Total Revenue">\n'
+            f'    <span class="db-label">Total Revenue</span>\n'
+            f"  </div>\n\n"
+            f"Every visual must have a non-zero bounding box in the rendered HTML."
+        )
+
+    return nodes
 
 
 def _parse_js_nodes(raw: list[dict[str, Any]]) -> list[VisualNode]:
