@@ -5,6 +5,7 @@ import pytest
 
 from simbi_mcp.mockup.validator import ValidationError, validate_mockup
 from simbi_mcp.types import (
+    ModelColumn,
     ModelMeasure,
     ModelSchema,
     ModelTable,
@@ -15,7 +16,7 @@ from simbi_mcp.types import (
 def schema() -> ModelSchema:
     return ModelSchema(
         tables=[
-            ModelTable(name="sales", columns=["Region", "OrderDate", "Revenue"]),
+            ModelTable(name="sales", columns=[ModelColumn(name="Region"), ModelColumn(name="OrderDate"), ModelColumn(name="Revenue")]),
         ],
         measures=[
             ModelMeasure(
@@ -47,13 +48,13 @@ def test_valid_dashboard_passes(schema: ModelSchema, fixtures_html: Path) -> Non
 
 def test_invalid_measures_raises(schema: ModelSchema, fixtures_html: Path) -> None:
     html = (fixtures_html / "invalid_measures.html").read_text()
-    with pytest.raises(ValidationError, match="unknown measure"):
+    with pytest.raises(ValidationError, match="does not exist in the schema"):
         validate_mockup(html, schema)
 
 
 def test_unknown_visual_type_raises(schema: ModelSchema) -> None:
     html = '<div data-pbi="pieChart" data-pbi-measure="Total Revenue"></div>'
-    with pytest.raises(ValidationError, match="Unknown visual type"):
+    with pytest.raises(ValidationError, match="Unknown data-pbi value"):
         validate_mockup(html, schema)
 
 
@@ -104,4 +105,31 @@ def test_table_visual_validates_each_column(schema: ModelSchema) -> None:
         'data-pbi-columns="HallucinatedMeasure,Total Revenue"></div>'
     )
     with pytest.raises(ValidationError, match="HallucinatedMeasure"):
+        validate_mockup(html, schema)
+
+
+def test_table_visual_accepts_mixed_columns_and_measures(schema: ModelSchema) -> None:
+    """A table token may be EITHER a measure name OR a Table[Column] ref."""
+    html = (
+        '<div data-pbi="table" '
+        'data-pbi-columns="sales[Region],Total Revenue,sales[OrderDate],Order Count"></div>'
+    )
+    validate_mockup(html, schema)  # must not raise
+
+
+def test_table_visual_rejects_unknown_column_in_mixed_list(schema: ModelSchema) -> None:
+    html = (
+        '<div data-pbi="table" '
+        'data-pbi-columns="sales[FakeColumn],Total Revenue"></div>'
+    )
+    with pytest.raises(ValidationError, match="FakeColumn"):
+        validate_mockup(html, schema)
+
+
+def test_table_visual_rejects_unknown_table_in_mixed_list(schema: ModelSchema) -> None:
+    html = (
+        '<div data-pbi="table" '
+        'data-pbi-columns="FakeTable[Region],Total Revenue"></div>'
+    )
+    with pytest.raises(ValidationError, match="FakeTable"):
         validate_mockup(html, schema)
