@@ -25,6 +25,7 @@ _VISUAL_SCHEMA = (
 _PBI_VISUAL_TYPE: dict[VisualType, str] = {
     VisualType.CARD: "card",
     VisualType.COLUMN_CHART: "columnChart",
+    VisualType.BAR_CHART: "barChart",
     VisualType.LINE_CHART: "lineChart",
     VisualType.SLICER: "slicer",
     VisualType.TABLE: "tableEx",
@@ -69,7 +70,7 @@ def _build_query_state(
     if vtype is VisualType.CARD:
         return {"Values": {"projections": [_measure_proj(attrs["data-pbi-measure"], schema)]}}
 
-    if vtype is VisualType.COLUMN_CHART:
+    if vtype in (VisualType.COLUMN_CHART, VisualType.BAR_CHART):
         return {
             "Category": {"projections": [_column_proj(attrs["data-pbi-axis"], active=True)]},
             "Y": {"projections": [_measure_proj(attrs["data-pbi-values"], schema)]},
@@ -88,8 +89,14 @@ def _build_query_state(
         return {"Field": {"projections": [_column_proj(attrs["data-pbi-field"], active=True)]}}
 
     if vtype is VisualType.TABLE:
-        names = [n.strip() for n in attrs["data-pbi-columns"].split(",") if n.strip()]
-        return {"Values": {"projections": [_measure_proj(n, schema) for n in names]}}
+        tokens = [n.strip() for n in attrs["data-pbi-columns"].split(",") if n.strip()]
+        projections: list[dict[str, Any]] = []
+        for token in tokens:
+            if _COL_REF_RE.match(token):
+                projections.append(_column_proj(token))
+            else:
+                projections.append(_measure_proj(token, schema))
+        return {"Values": {"projections": projections}}
 
     raise ValueError(f"Unsupported visual type: {vtype!r}")
 

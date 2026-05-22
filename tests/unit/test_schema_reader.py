@@ -49,10 +49,10 @@ def test_parse_table_names() -> None:
 
 def test_parse_column_names() -> None:
     schema = parse_tmdl_schema(SAMPLE_TMDL)
-    cols = schema.tables[0].columns
-    assert "OrderID" in cols
-    assert "OrderDate" in cols
-    assert "Revenue" in cols
+    col_names = [c.name for c in schema.tables[0].columns]
+    assert "OrderID" in col_names
+    assert "OrderDate" in col_names
+    assert "Revenue" in col_names
 
 
 def test_parse_measures() -> None:
@@ -96,7 +96,7 @@ table Orders
     assert len(schema.tables) == 2
     assert any(t.name == "Customers" for t in schema.tables)
     orders_table = next(t for t in schema.tables if t.name == "Orders")
-    assert "OrderID" in orders_table.columns
+    assert any(c.name == "OrderID" for c in orders_table.columns)
     assert schema.has_measure("Order Count")
     assert schema.find_measure("Order Count").table == "Orders"
 
@@ -104,6 +104,70 @@ table Orders
 def test_raises_on_empty_input() -> None:
     with pytest.raises(ValueError, match="empty"):
         parse_tmdl_schema("")
+
+
+def test_calculated_table_column_type_inference() -> None:
+    """Calculated tables (CALENDARAUTO etc.) emit TMDL columns WITHOUT explicit
+    `dataType:` lines — the type is implied by the DAX expression. The reader
+    must infer from `formatString:` and column-name heuristics instead of
+    falling back to `string` for everything."""
+    tmdl = """\
+table Calendar
+\tlineageTag: 1234-abcd
+
+\tcolumn Date
+\t\tformatString: General Date
+\t\tlineageTag: a1
+\t\tsummarizeBy: none
+\t\tsourceColumn: [Date]
+
+\tcolumn Year
+\t\tformatString: 0
+\t\tlineageTag: a2
+\t\tsummarizeBy: sum
+\t\tsourceColumn: [Year]
+
+\tcolumn MonthNo
+\t\tformatString: 0
+\t\tlineageTag: a3
+\t\tsummarizeBy: sum
+\t\tsourceColumn: [MonthNo]
+
+\tcolumn MonthName
+\t\tlineageTag: a4
+\t\tsummarizeBy: none
+\t\tsourceColumn: [MonthName]
+
+\tcolumn Quarter
+\t\tlineageTag: a5
+\t\tsummarizeBy: none
+\t\tsourceColumn: [Quarter]
+
+\tpartition Calendar = calculated
+\t\tmode: import
+\t\tsource = ADDCOLUMNS(CALENDARAUTO(), "Year", YEAR([Date]))
+"""
+    schema = parse_tmdl_schema(tmdl)
+    cols = {c.name: c.data_type for c in schema.tables[0].columns}
+    assert cols == {
+        "Date": "dateTime",
+        "Year": "int64",
+        "MonthNo": "int64",
+        "MonthName": "string",
+        "Quarter": "string",
+    }
+
+
+def test_explicit_dataType_overrides_inference() -> None:
+    """If the TMDL gives an explicit dataType, never override it from a heuristic."""
+    tmdl = """\
+table Sales
+\tcolumn Year
+\t\tdataType: string
+\t\tformatString: 0
+"""
+    schema = parse_tmdl_schema(tmdl)
+    assert schema.tables[0].columns[0].data_type == "string"
 
 
 def test_model_level_ref_tables_ignored() -> None:

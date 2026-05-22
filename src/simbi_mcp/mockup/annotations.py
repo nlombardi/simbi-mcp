@@ -16,7 +16,8 @@ class VisualAttrSpec(TypedDict):
 
 class VisualType(StrEnum):
     CARD = "card"
-    COLUMN_CHART = "columnChart"
+    COLUMN_CHART = "columnChart"   # vertical bars (PBI's name; X = category, Y = value)
+    BAR_CHART = "barChart"         # horizontal bars (Y = category, X = value)
     LINE_CHART = "lineChart"
     SLICER = "slicer"
     TABLE = "table"
@@ -30,6 +31,10 @@ VISUAL_ATTRS: dict[VisualType, VisualAttrSpec] = {
         "optional": [],
     },
     VisualType.COLUMN_CHART: {
+        "required": ["data-pbi-axis", "data-pbi-values"],
+        "optional": [],
+    },
+    VisualType.BAR_CHART: {
         "required": ["data-pbi-axis", "data-pbi-values"],
         "optional": [],
     },
@@ -57,9 +62,13 @@ required data-pbi-* attributes shown below.
   card
     data-pbi-measure="<Measure Name>"      ← exact measure name from the schema
 
-  columnChart
+  columnChart      (vertical bars — category on X axis)
     data-pbi-axis="<Table>[<Column>]"      ← dimension column for X axis
     data-pbi-values="<Measure Name>"       ← measure for Y axis
+
+  barChart         (horizontal bars — category on Y axis)
+    data-pbi-axis="<Table>[<Column>]"      ← dimension column for Y axis
+    data-pbi-values="<Measure Name>"       ← measure for X axis
 
   lineChart
     data-pbi-axis="<Table>[<Column>]"      ← dimension for X axis
@@ -70,11 +79,21 @@ required data-pbi-* attributes shown below.
     data-pbi-field="<Table>[<Column>]"     ← field to filter on
 
   table
-    data-pbi-columns="<name1>,<name2>"     ← comma-separated measure names
+    data-pbi-columns="<tok1>,<tok2>,..."   ← comma-separated mix of measure names
+                                              and Table[Column] refs. Each token is
+                                              independently either a bare measure name
+                                              (e.g. "Total Revenue") or a column ref
+                                              (e.g. "sales[Region]"). Column tokens
+                                              become row groupings; measure tokens
+                                              become aggregated value columns.
 
 RULES:
-- data-pbi-measure and data-pbi-values must be exact measure names from the schema.
-- data-pbi-axis, data-pbi-field, data-pbi-series must use Table[Column] format.
+- data-pbi-measure and data-pbi-values values must be exact measure names from the
+  schema (e.g. "Total Revenue") — never Table[Column] format.
+- data-pbi-axis, data-pbi-field, data-pbi-series must use Table[Column] format
+  (e.g. "sales[Region]") — never a bare measure name.
+- data-pbi-columns (table visual only) is the ONE attribute that accepts both:
+  each comma-separated token may be either a measure name OR a Table[Column] ref.
 - Never invent a measure or column name not present in the schema.
 """
 

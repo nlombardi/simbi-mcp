@@ -5,7 +5,7 @@ import pytest
 
 from simbi_mcp.pbir.extractor import VisualNode
 from simbi_mcp.pbir.templates import build_visual_json
-from simbi_mcp.types import ModelMeasure, ModelSchema, ModelTable
+from simbi_mcp.types import ModelColumn, ModelMeasure, ModelSchema, ModelTable
 
 _VISUAL_SCHEMA = (
     "https://developer.microsoft.com/json-schemas/fabric/item/report"
@@ -16,7 +16,7 @@ _VISUAL_SCHEMA = (
 @pytest.fixture
 def schema() -> ModelSchema:
     return ModelSchema(
-        tables=[ModelTable(name="sales", columns=["Region", "OrderDate"])],
+        tables=[ModelTable(name="sales", columns=[ModelColumn(name="Region"), ModelColumn(name="OrderDate")])],
         measures=[
             ModelMeasure(
                 name="Total Revenue",
@@ -155,6 +155,34 @@ def test_table_visual_type_is_tableEx(schema: ModelSchema) -> None:
     assert len(projections) == 2
     assert projections[0]["nativeQueryRef"] == "Total Revenue"
     assert projections[1]["nativeQueryRef"] == "Order Count"
+
+
+def test_table_visual_mixes_columns_and_measures(schema: ModelSchema) -> None:
+    """Each token is independently compiled — column refs go to Column proj,
+    bare names go to Measure proj. Ordering is preserved."""
+    node = VisualNode(
+        x=0, y=0, width=1280, height=200,
+        attrs={
+            "data-pbi": "table",
+            "data-pbi-columns": "sales[Region],Total Revenue,sales[OrderDate],Order Count",
+        },
+    )
+    result = build_visual_json(node, z_order=0, schema=schema)
+    projections = result["visual"]["query"]["queryState"]["Values"]["projections"]
+    assert len(projections) == 4
+
+    assert "Column" in projections[0]["field"]
+    assert projections[0]["field"]["Column"]["Property"] == "Region"
+    assert projections[0]["queryRef"] == "sales.Region"
+
+    assert "Measure" in projections[1]["field"]
+    assert projections[1]["field"]["Measure"]["Property"] == "Total Revenue"
+
+    assert "Column" in projections[2]["field"]
+    assert projections[2]["field"]["Column"]["Property"] == "OrderDate"
+
+    assert "Measure" in projections[3]["field"]
+    assert projections[3]["field"]["Measure"]["Property"] == "Order Count"
 
 
 def test_drill_filter_always_true(schema: ModelSchema) -> None:
