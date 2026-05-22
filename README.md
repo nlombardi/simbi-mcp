@@ -149,47 +149,58 @@ C:/Reports/SalesDashboard/
 
 ### Path 2 — MS Power BI MCP builds the semantic model, SimBI builds the report
 
-The MS Power BI MCP loads the CSV into Power BI Desktop and creates the real semantic model. SimBI then generates the report layout into the **same folder**. Because the SemanticModel already exists, SimBI skips the stub and the result is a fully data-connected report.
+The MS Power BI MCP builds the full live semantic model (measures, calculated tables, relationships, loaded data). SimBI generates the report layout. The result is a fully data-connected report.
 
-**Step 1 — Let the MS Power BI MCP create and save the semantic model:**
+> **Critical ordering rule:** Power BI Desktop must be **open** while the MCP builds the model, and **closed** before SimBI emits the report. Writing to the `.Report` folder while the file is open has no effect — Power BI Desktop serves its cached in-memory Report and ignores disk changes until a cold open.
+
+**Step 1 — Open the .pbip in Power BI Desktop, then build the model with the MS Power BI MCP:**
 ```
+The file C:/Reports/SalesDashboard/SalesDashboard.pbip is open in Power BI Desktop.
+
 Use the Power BI MCP to:
-1. Create a new project named "SalesDashboard" saved to C:/Reports/SalesDashboard
-2. Load C:/Data/sales.csv as the "sales" table
-3. Create measures: Total Revenue = SUM(sales[Revenue]),
-   Order Count = COUNTROWS(sales), Avg Unit Price = [Total Revenue] / SUM(sales[Units])
-4. Export the TMDL
+1. Connect to the running Power BI Desktop instance
+2. Refresh data to load C:/Data/sales.csv
+3. Create a Calendar calculated table:
+   ADDCOLUMNS(CALENDARAUTO(), "MonthName", FORMAT([Date], "MMM YYYY"), ...)
+4. Create a relationship from sales[OrderDate] (Many) to Calendar[Date] (One)
+5. Mark Calendar as the date table
+6. Create measures: Total Revenue, Order Count, Avg Unit Price
+7. Full model refresh
+8. ExportToTmdlFolder → C:/Reports/SalesDashboard/SalesDashboard.SemanticModel/definition
 ```
 
-After this step the MS MCP will have saved:
+**Step 2 — Close Power BI Desktop.**
+
+This is mandatory. Do not skip it.
+
+**Step 3 — Have SimBI generate the report:**
 ```
-C:/Reports/SalesDashboard/
-  SalesDashboard.SemanticModel/   ← real model with loaded data
+Power BI Desktop is now closed.
+
+Use SimBI to build a sales dashboard:
+1. parse_schema from C:/Reports/SalesDashboard/SalesDashboard.SemanticModel/definition
+2. Generate HTML using db-page, db-grid, db-card, db-chart-area classes
+   (every visual needs real CSS dimensions — zero-size elements are rejected)
+3. validate_mockup_html
+4. emit_report with pbip_path = C:/Reports/SalesDashboard/SalesDashboard.pbip
 ```
 
-**Step 2 — Have SimBI generate the report into the same folder:**
-```
-Now use SimBI to build a sales dashboard report.
-Use the TMDL from the previous step.
-Save it to C:/Reports/SalesDashboard as "SalesDashboard"
-```
+**Step 4 — Open the .pbip fresh in Power BI Desktop.**
 
-**What Claude does:**
-1. Reads `simbi://annotation-vocabulary`
-2. Calls `parse_schema` with the TMDL from Step 1
-3. Generates the annotated HTML mockup in-context
-4. Calls `emit_report(report_name="SalesDashboard", output_dir="C:/Reports/SalesDashboard")`
-   — sees the existing `SalesDashboard.SemanticModel/` and skips the stub
+Both the semantic model and the report are read from disk on cold open — all visuals appear with live data immediately, no refresh needed.
 
 **Output:**
 ```
 C:/Reports/SalesDashboard/
-  SalesDashboard.pbip             ← open this
+  SalesDashboard.pbip
   SalesDashboard.Report/
-  SalesDashboard.SemanticModel/   ← real model, untouched
+    definition/pages/<guid>/visuals/   ← visual.json files
+  SalesDashboard.SemanticModel/
+    definition/
+      tables/Calendar.tmdl             ← calculated date table
+      tables/sales_small.tmdl          ← measures + partition
+      relationships.tmdl               ← active Calendar relationship
 ```
-
-Open `SalesDashboard.pbip` in Power BI Desktop — visuals are connected and can be refreshed.
 
 ---
 
