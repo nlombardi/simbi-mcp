@@ -137,11 +137,16 @@ def test_slicer(schema: ModelSchema) -> None:
         attrs={"data-pbi": "slicer", "data-pbi-field": "sales[Region]"},
     )
     result = build_visual_json(node, z_order=2000, schema=schema)
-    assert result["visual"]["visualType"] == "slicer"
-    field_proj = result["visual"]["query"]["queryState"]["Field"]["projections"][0]
-    assert field_proj["field"]["Column"]["Property"] == "Region"
-    assert field_proj["active"] is True
-    assert field_proj["queryRef"] == "sales.Region"
+    assert result["visual"]["visualType"] == "advancedSlicerVisual"
+    values_proj = result["visual"]["query"]["queryState"]["Values"]["projections"][0]
+    assert values_proj["field"]["Column"]["Property"] == "Region"
+    assert values_proj["queryRef"] == "sales.Region"
+    # objects.general is required by PBI Desktop to render the advanced slicer
+    assert result["visual"]["objects"] == {"general": [{"properties": {}}]}
+    # filterConfig wires up cross-filtering
+    fc = result["filterConfig"]["filters"][0]
+    assert fc["type"] == "Categorical"
+    assert fc["field"]["Column"]["Property"] == "Region"
 
 
 def test_table_visual_type_is_tableEx(schema: ModelSchema) -> None:

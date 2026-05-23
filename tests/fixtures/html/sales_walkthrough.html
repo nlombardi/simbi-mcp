@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8" /><title>Sales Dashboard</title>
+<link rel="stylesheet" href="dashboard.css" /></head>
+<body class="db-page">
+  <div class="db-grid">
+
+    <!-- KPI cards -->
+    <div data-pbi="card" data-pbi-measure="Total Revenue" class="db-card db-col-1">
+      <div class="db-label">Total Revenue</div>
+      <div class="db-value">$0</div>
+    </div>
+    <div data-pbi="card" data-pbi-measure="Order Count" class="db-card db-col-1">
+      <div class="db-label">Orders</div>
+      <div class="db-value">0</div>
+    </div>
+    <div data-pbi="card" data-pbi-measure="Avg Unit Price" class="db-card db-col-1">
+      <div class="db-label">Avg Unit Price</div>
+      <div class="db-value">$0</div>
+    </div>
+
+    <!-- Category slicer -->
+    <div data-pbi="slicer" data-pbi-field="sales[Category]" class="db-card db-col-1">
+      <div class="db-label">Category</div>
+      <div class="db-slicer-items">
+        <span class="db-pill active">All</span>
+      </div>
+    </div>
+
+    <!-- Revenue by Region -->
+    <div data-pbi="columnChart"
+         data-pbi-axis="sales[Region]"
+         data-pbi-values="Total Revenue"
+         class="db-card db-col-2">
+      <div class="db-chart-area">Revenue by Region</div>
+    </div>
+
+    <!-- Revenue over time -->
+    <div data-pbi="lineChart"
+         data-pbi-axis="sales[OrderDate]"
+         data-pbi-values="Total Revenue"
+         class="db-card db-col-3">
+      <div class="db-chart-area">Revenue over Time</div>
+    </div>
+
+  </div>
+</body>
+</html>

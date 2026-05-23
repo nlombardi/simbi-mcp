@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from simbi_mcp.pbir.emitter import emit_pbir
-from simbi_mcp.types import ModelMeasure, ModelSchema, ModelTable
+from simbi_mcp.types import ModelColumn, ModelMeasure, ModelSchema, ModelTable
 
 pytestmark = pytest.mark.integration
 
@@ -25,7 +25,7 @@ _FIXTURES_HTML = Path(__file__).parent.parent / "fixtures" / "html"
 def schema() -> ModelSchema:
     return ModelSchema(
         tables=[
-            ModelTable(name="sales", columns=["Region", "OrderDate", "Revenue"]),
+            ModelTable(name="sales", columns=[ModelColumn(name="Region"), ModelColumn(name="OrderDate"), ModelColumn(name="Revenue")]),
         ],
         measures=[
             ModelMeasure(
