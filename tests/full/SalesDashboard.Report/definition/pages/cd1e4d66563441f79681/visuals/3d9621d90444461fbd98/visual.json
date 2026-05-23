@@ -1,0 +1,38 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.3.0/schema.json",
+  "name": "3d9621d90444461fbd98",
+  "position": {
+    "x": 856.0,
+    "y": 24.0,
+    "z": 2000,
+    "height": 225.390625,
+    "width": 400.0,
+    "tabOrder": 2000
+  },
+  "visual": {
+    "visualType": "card",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "sales_small"
+                    }
+                  },
+                  "Property": "Average Unit Price"
+                }
+              },
+              "queryRef": "sales_small.Average Unit Price",
+              "nativeQueryRef": "Average Unit Price"
+            }
+          ]
+        }
+      }
+    },
+    "drillFilterOtherVisuals": true
+  }
+}

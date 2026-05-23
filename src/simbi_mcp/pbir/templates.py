@@ -27,7 +27,7 @@ _PBI_VISUAL_TYPE: dict[VisualType, str] = {
     VisualType.COLUMN_CHART: "columnChart",
     VisualType.BAR_CHART: "barChart",
     VisualType.LINE_CHART: "lineChart",
-    VisualType.SLICER: "slicer",
+    VisualType.SLICER: "advancedSlicerVisual",
     VisualType.TABLE: "tableEx",
 }
 
@@ -39,7 +39,12 @@ def build_visual_json(
 ) -> dict[str, Any]:
     """Build the full visual.json dict for a single annotated DOM node."""
     vtype = node.visual_type
-    return {
+    visual: dict[str, Any] = {
+        "visualType": _PBI_VISUAL_TYPE[vtype],
+        "query": {"queryState": _build_query_state(vtype, node.attrs, schema)},
+        "drillFilterOtherVisuals": True,
+    }
+    container: dict[str, Any] = {
         "$schema": _VISUAL_SCHEMA,
         "name": _new_guid(),
         "position": {
@@ -50,12 +55,21 @@ def build_visual_json(
             "width": node.width,
             "tabOrder": z_order,
         },
-        "visual": {
-            "visualType": _PBI_VISUAL_TYPE[vtype],
-            "query": {"queryState": _build_query_state(vtype, node.attrs, schema)},
-            "drillFilterOtherVisuals": True,
-        },
+        "visual": visual,
     }
+    if vtype is VisualType.SLICER:
+        visual["objects"] = {"general": [{"properties": {}}]}
+        col_proj = _column_proj(node.attrs["data-pbi-field"])
+        container["filterConfig"] = {
+            "filters": [
+                {
+                    "name": _new_guid(),
+                    "field": col_proj["field"],
+                    "type": "Categorical",
+                }
+            ]
+        }
+    return container
 
 
 def _new_guid() -> str:
@@ -86,7 +100,7 @@ def _build_query_state(
         return qs
 
     if vtype is VisualType.SLICER:
-        return {"Field": {"projections": [_column_proj(attrs["data-pbi-field"], active=True)]}}
+        return {"Values": {"projections": [_column_proj(attrs["data-pbi-field"])]}}
 
     if vtype is VisualType.TABLE:
         tokens = [n.strip() for n in attrs["data-pbi-columns"].split(",") if n.strip()]

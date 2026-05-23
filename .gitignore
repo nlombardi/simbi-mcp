@@ -9,3 +9,6 @@ __pycache__/
 dist/
 build/
 spikes/.venv/
+.claude
+docs
+.vscode

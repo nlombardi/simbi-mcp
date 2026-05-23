@@ -1,0 +1,100 @@
+/// Sales transactions loaded from sales_small.csv
+table Sales
+	lineageTag: 16af4f8a-dca7-41ce-a164-3ee7ed82e224
+
+	/// Sum of all revenue across all orders
+	measure 'Total Revenue' = SUM(Sales[Revenue])
+		formatString: \$#,0.00;(\$#,0.00)
+		lineageTag: 774dd9c9-35a7-472f-a45c-0cf11b7dacdc
+
+	/// Total number of units sold
+	measure 'Total Units Sold' = SUM(Sales[UnitsSold])
+		formatString: #,0
+		lineageTag: 62a06f60-d0ca-4f56-ad3e-9630c4c0b1ab
+
+	/// Count of individual order rows
+	measure 'Number of Orders' = COUNTROWS(Sales)
+		formatString: #,0
+		lineageTag: ad9faecf-963f-4ad9-8a7f-6bfc81d65123
+
+	/// Average revenue per order
+	measure 'Average Order Value' = DIVIDE([Total Revenue], [Number of Orders])
+		formatString: \$#,0.00;(\$#,0.00)
+		lineageTag: bf2be334-0f78-4d6c-ac85-72763aaa49a9
+
+	/// Average unit price across all products
+	measure 'Average Unit Price' = AVERAGE(Sales[UnitPrice])
+		formatString: \$#,0.00;(\$#,0.00)
+		lineageTag: 1577c6d3-cc94-4a57-87a3-2c3bb997a38a
+
+	column OrderID
+		dataType: int64
+		isNullable: false
+		lineageTag: 29a1ccac-beb0-4f9c-ad5d-a1a03736fe51
+		summarizeBy: none
+		sourceColumn: OrderID
+
+	column OrderDate
+		dataType: dateTime
+		formatString: Short Date
+		lineageTag: 6a3eab3e-e666-4e85-a9ff-8ebc2f6b51af
+		summarizeBy: none
+		sourceColumn: OrderDate
+
+	column Region
+		dataType: string
+		lineageTag: 90c182fc-4fc4-450f-a150-254545ab9973
+		summarizeBy: none
+		sourceColumn: Region
+
+	column Product
+		dataType: string
+		lineageTag: 8f5858c1-c27d-482f-acba-c453e36acc65
+		summarizeBy: none
+		sourceColumn: Product
+
+	column Category
+		dataType: string
+		lineageTag: 9de9e4b4-c196-467b-bf3e-037250ce773e
+		summarizeBy: none
+		sourceColumn: Category
+
+	column UnitsSold
+		dataType: int64
+		lineageTag: 221972d3-f662-419a-b3f5-1daf44fa88a3
+		summarizeBy: sum
+		sourceColumn: UnitsSold
+
+	column UnitPrice
+		dataType: double
+		formatString: \$#,0.00;(\$#,0.00)
+		lineageTag: 8bcde617-ebc8-4098-9eae-75be62d29f6d
+		summarizeBy: none
+		sourceColumn: UnitPrice
+
+	column Revenue
+		dataType: double
+		formatString: \$#,0.00;(\$#,0.00)
+		lineageTag: 3c5413b9-1d40-4f32-8b2a-58d9e121363b
+		summarizeBy: sum
+		sourceColumn: Revenue
+
+	partition Sales = m
+		mode: import
+		source =
+				let
+				    Source = Csv.Document(File.Contents("Q:\\Development\\DataSense\\SimBI MCP\\tests\\fixtures\\datasets\\sales_small.csv"), [Delimiter=",", Columns=8, Encoding=1252, QuoteStyle=QuoteStyle.None]),
+				    PromotedHeaders = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+				    ChangedTypes = Table.TransformColumnTypes(PromotedHeaders, {
+				        {"OrderID", Int64.Type},
+				        {"OrderDate", type date},
+				        {"Region", type text},
+				        {"Product", type text},
+				        {"Category", type text},
+				        {"UnitsSold", Int64.Type},
+				        {"UnitPrice", type number},
+				        {"Revenue", type number}
+				    })
+				in
+				    ChangedTypes
+

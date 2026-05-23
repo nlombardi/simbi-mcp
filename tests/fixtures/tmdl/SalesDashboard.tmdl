@@ -1,0 +1,425 @@
+model Model
+	culture: en-US
+	defaultPowerBIDataSourceVersion: powerBI_V3
+	sourceQueryCulture: en-US
+	dataAccessOptions
+		legacyRedirects
+		returnErrorValuesAsNull
+
+	table sales_small
+		lineageTag: 3501b34b-dd04-4c2e-bec1-6a3c70624154
+
+		/// Sum of all revenue across transactions
+		measure 'Total Revenue' = SUM(sales_small[Revenue])
+			formatString: $#,0.00
+			displayFolder: Key Metrics
+			lineageTag: ae5c6441-8fad-4934-a1e8-98741e095efc
+
+		/// Estimated total cost (65% of revenue). Replace with SUM(sales_small[Cost]) when a cost column is available.
+		measure 'Total Cost' = SUMX(sales_small, sales_small[UnitsSold] * sales_small[UnitPrice] * 0.65)
+			formatString: $#,0.00
+			isHidden
+			displayFolder: Key Metrics
+			lineageTag: 67f837d0-3951-4036-b661-d1c811970a29
+
+		/// Gross profit margin as a percentage of revenue. Uses estimated cost (65% of revenue) until a real cost column is added.
+		measure 'Profit Margin %' = DIVIDE([Total Revenue] - [Total Cost], [Total Revenue], BLANK())
+			formatString: 0.0%
+			displayFolder: Key Metrics
+			lineageTag: 8f90bc7a-cb45-4128-a7a2-9364e8347ce8
+
+		column OrderID
+			dataType: int64
+			formatString: 0
+			lineageTag: 477e7f02-58dc-4404-abb8-af1c3457fe6c
+			summarizeBy: count
+			sourceColumn: OrderID
+
+			annotation SummarizationSetBy = Automatic
+
+		column OrderDate
+			dataType: dateTime
+			formatString: Long Date
+			lineageTag: ad1d6d78-ef2d-47d1-82d0-135840307ac8
+			summarizeBy: none
+			sourceColumn: OrderDate
+
+			variation Variation
+				isDefault
+				relationship: 0a5924e8-ec8c-4266-ade7-29a18103e2e5
+				defaultHierarchy: LocalDateTable_9d3e2dd8-c305-4b1c-8835-86dc75a30ce1.'Date Hierarchy'
+
+			annotation SummarizationSetBy = Automatic
+
+			annotation UnderlyingDateTimeDataType = Date
+
+		column Region
+			dataType: string
+			lineageTag: 6a687f6a-e297-4c6c-972f-52fdad1a526a
+			summarizeBy: none
+			sourceColumn: Region
+
+			annotation SummarizationSetBy = Automatic
+
+		column Product
+			dataType: string
+			lineageTag: 4ebe9c7f-70d7-4d68-b81b-f26821d78b7a
+			summarizeBy: none
+			sourceColumn: Product
+
+			annotation SummarizationSetBy = Automatic
+
+		column Category
+			dataType: string
+			lineageTag: d23d2e7a-a7dd-4962-90c8-6b6390a626eb
+			summarizeBy: none
+			sourceColumn: Category
+
+			annotation SummarizationSetBy = Automatic
+
+		column UnitsSold
+			dataType: int64
+			formatString: 0
+			lineageTag: f47418dd-4270-4a4d-a97f-805de2ee90b1
+			summarizeBy: sum
+			sourceColumn: UnitsSold
+
+			annotation SummarizationSetBy = Automatic
+
+		column UnitPrice
+			dataType: double
+			lineageTag: 9222ca40-6873-4538-a72a-576b5c008ab8
+			summarizeBy: sum
+			sourceColumn: UnitPrice
+
+			annotation SummarizationSetBy = Automatic
+
+			annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+		column Revenue
+			dataType: double
+			lineageTag: e1405904-abcc-4972-961b-eb1350894dd3
+			summarizeBy: sum
+			sourceColumn: Revenue
+
+			annotation SummarizationSetBy = Automatic
+
+			annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+		partition sales_small = m
+			mode: import
+			source =
+					let
+					    Source = Csv.Document(File.Contents("Q:\Development\DataSense\Tutorials\PowerBI\test\Data\sales_small.csv"),[Delimiter=",", Columns=8, Encoding=1252, QuoteStyle=QuoteStyle.None]),
+					    #"Promoted Headers" = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+					    #"Changed Type" = Table.TransformColumnTypes(#"Promoted Headers",{{"OrderID", Int64.Type}, {"OrderDate", type date}, {"Region", type text}, {"Product", type text}, {"Category", type text}, {"UnitsSold", Int64.Type}, {"UnitPrice", type number}, {"Revenue", type number}})
+					in
+					    #"Changed Type"
+
+		annotation PBI_ResultType = Table
+
+	table DateTableTemplate_63c80355-e2ea-4130-99df-3bc97c480293
+		isHidden
+		isPrivate
+		lineageTag: a50a1d25-e48c-40d7-a02c-69e35d4feeea
+
+		column Date
+			dataType: dateTime
+			isHidden
+			formatString: General Date
+			lineageTag: 07f64d28-37c3-4f58-935d-638cc0280244
+			dataCategory: PaddedDateTableDates
+			summarizeBy: none
+			isNameInferred
+			sourceColumn: [Date]
+
+			annotation SummarizationSetBy = User
+
+		column Year = YEAR([Date])
+			dataType: int64
+			isHidden
+			formatString: 0
+			lineageTag: 2506cb14-5d56-4f8a-96a7-83f267275487
+			dataCategory: Years
+			summarizeBy: none
+
+			annotation SummarizationSetBy = User
+
+			annotation TemplateId = Year
+
+		column MonthNo = MONTH([Date])
+			dataType: int64
+			isHidden
+			formatString: 0
+			lineageTag: 5775e831-b13f-4fa2-a89f-1a06d841f407
+			dataCategory: MonthOfYear
+			summarizeBy: none
+
+			annotation SummarizationSetBy = User
+
+			annotation TemplateId = MonthNumber
+
+		column Month = FORMAT([Date], "MMMM")
+			dataType: string
+			isHidden
+			lineageTag: e36dc464-5312-4bb1-8ca0-c83b42be1934
+			dataCategory: Months
+			summarizeBy: none
+			sortByColumn: MonthNo
+
+			annotation SummarizationSetBy = User
+
+			annotation TemplateId = Month
+
+		column QuarterNo = INT(([MonthNo] + 2) / 3)
+			dataType: int64
+			isHidden
+			formatString: 0
+			lineageTag: ea2ad383-5cfe-4f62-aa15-78985afdbf9d
+			dataCategory: QuarterOfYear
+			summarizeBy: none
+
+			annotation SummarizationSetBy = User
+
+			annotation TemplateId = QuarterNumber
+
+		column Quarter = "Qtr " & [QuarterNo]
+			dataType: string
+			isHidden
+			lineageTag: 5c263a05-8d47-404b-9815-fe14a104aae6
+			dataCategory: Quarters
+			summarizeBy: none
+			sortByColumn: QuarterNo
+
+			annotation SummarizationSetBy = User
+
+			annotation TemplateId = Quarter
+
+		column Day = DAY([Date])
+			dataType: int64
+			isHidden
+			formatString: 0
+			lineageTag: 4ab75aca-46a6-4676-aed5-3f6fc3d09572
+			dataCategory: DayOfMonth
+			summarizeBy: none
+
+			annotation SummarizationSetBy = User
+
+			annotation TemplateId = Day
+
+		hierarchy 'Date Hierarchy'
+			lineageTag: cfe52143-9c88-4c56-9e5c-eb956f127859
+
+			level Year
+				lineageTag: 9b59f016-d2bc-4076-8412-5b7a0830da51
+				column: Year
+
+			level Quarter
+				lineageTag: 2bccce29-671a-4607-982c-4514d5d9c538
+				column: Quarter
+
+			level Month
+				lineageTag: dc5585d9-9c07-4bae-8af2-edd82e48714a
+				column: Month
+
+			level Day
+				lineageTag: 3bed33a1-593e-4686-b041-d1f629a424ff
+				column: Day
+
+			annotation TemplateId = DateHierarchy
+
+		partition DateTableTemplate_63c80355-e2ea-4130-99df-3bc97c480293 = calculated
+			mode: import
+			source = Calendar(Date(2015,1,1), Date(2015,1,1))
+
+		annotation __PBI_TemplateDateTable = true
+
+		annotation DefaultItem = DateHierarchy
+
+	table LocalDateTable_9d3e2dd8-c305-4b1c-8835-86dc75a30ce1
+		isHidden
+		showAsVariationsOnly
+		lineageTag: 9cdad939-2459-4659-b872-e0697235195b
+
+		column Date
+			dataType: dateTime
+			isHidden
+			formatString: General Date
+			lineageTag: 8a46ba35-d526-4f38-8874-74dfffbf3cfa
+			dataCategory: PaddedDateTableDates
+			summarizeBy: none
+			isNameInferred
+			sourceColumn: [Date]
+
+			annotation SummarizationSetBy = User
+
+		column Year = YEAR([Date])
+			dataType: int64
+			isHidden
+			formatString: 0
+			lineageTag: c07c3f26-bff4-4cbd-b4fe-0a666019fc16
+			dataCategory: Years
+			summarizeBy: none
+
+			annotation SummarizationSetBy = User
+
+			annotation TemplateId = Year
+
+		column MonthNo = MONTH([Date])
+			dataType: int64
+			isHidden
+			formatString: 0
+			lineageTag: 7a0e2ca6-0bec-4bf5-a89e-9b6adbb05f2b
+			dataCategory: MonthOfYear
+			summarizeBy: none
+
+			annotation SummarizationSetBy = User
+
+			annotation TemplateId = MonthNumber
+
+		column Month = FORMAT([Date], "MMMM")
+			dataType: string
+			isHidden
+			lineageTag: 89a66b69-ef29-4873-81f7-e35597aa57e2
+			dataCategory: Months
+			summarizeBy: none
+			sortByColumn: MonthNo
+
+			annotation SummarizationSetBy = User
+
+			annotation TemplateId = Month
+
+		column QuarterNo = INT(([MonthNo] + 2) / 3)
+			dataType: int64
+			isHidden
+			formatString: 0
+			lineageTag: 975ad73e-c5fd-44c8-a983-d20f18d2c1a7
+			dataCategory: QuarterOfYear
+			summarizeBy: none
+
+			annotation SummarizationSetBy = User
+
+			annotation TemplateId = QuarterNumber
+
+		column Quarter = "Qtr " & [QuarterNo]
+			dataType: string
+			isHidden
+			lineageTag: 3234d13b-55aa-4a1a-a4c1-a584861735d1
+			dataCategory: Quarters
+			summarizeBy: none
+			sortByColumn: QuarterNo
+
+			annotation SummarizationSetBy = User
+
+			annotation TemplateId = Quarter
+
+		column Day = DAY([Date])
+			dataType: int64
+			isHidden
+			formatString: 0
+			lineageTag: ea8a3c9f-9fb5-4836-89dd-3415ff006978
+			dataCategory: DayOfMonth
+			summarizeBy: none
+
+			annotation SummarizationSetBy = User
+
+			annotation TemplateId = Day
+
+		hierarchy 'Date Hierarchy'
+			lineageTag: fa788f9c-772c-4033-9657-61f6ba7ac1fc
+
+			level Year
+				lineageTag: e6777670-d056-4258-b7f5-b07edbb2af5b
+				column: Year
+
+			level Quarter
+				lineageTag: 3fc4905a-dd93-46c5-9df1-79974bc62660
+				column: Quarter
+
+			level Month
+				lineageTag: 1c6156a9-a53d-4278-ad76-28feabdac957
+				column: Month
+
+			level Day
+				lineageTag: 0850e57a-f881-48ca-ba3a-033f5486c3c5
+				column: Day
+
+			annotation TemplateId = DateHierarchy
+
+		partition LocalDateTable_9d3e2dd8-c305-4b1c-8835-86dc75a30ce1 = calculated
+			mode: import
+			source = Calendar(Date(Year(MIN('sales_small'[OrderDate])), 1, 1), Date(Year(MAX('sales_small'[OrderDate])), 12, 31))
+
+		annotation __PBI_LocalDateTable = true
+
+	/// Date dimension for time intelligence
+	table Date
+		lineageTag: f138fff5-6c1c-452c-bf40-0c99be45654c
+		dataCategory: Time
+
+		column Date
+			isUnique
+			isNameInferred
+			sourceColumn: [Date]
+
+		column Year
+			isNameInferred
+			sourceColumn: [Year]
+
+		column QuarterNumber
+			isNameInferred
+			sourceColumn: [QuarterNumber]
+
+		column Quarter
+			isNameInferred
+			sourceColumn: [Quarter]
+
+		column MonthNumber
+			isNameInferred
+			sourceColumn: [MonthNumber]
+
+		column MonthName
+			isNameInferred
+			sourceColumn: [MonthName]
+
+		column DayOfWeek
+			isNameInferred
+			sourceColumn: [DayOfWeek]
+
+		column WeekdayName
+			isNameInferred
+			sourceColumn: [WeekdayName]
+
+		partition Date = calculated
+			mode: import
+			source =
+					ADDCOLUMNS(
+					    CALENDARAUTO(),
+					    "Year", YEAR([Date]),
+					    "QuarterNumber", QUARTER([Date]),
+					    "Quarter", "Q" & QUARTER([Date]),
+					    "MonthNumber", MONTH([Date]),
+					    "MonthName", FORMAT([Date], "MMMM"),
+					    "DayOfWeek", WEEKDAY([Date], 2),
+					    "WeekdayName", FORMAT([Date], "DDDD")
+					)
+
+	relationship 0a5924e8-ec8c-4266-ade7-29a18103e2e5
+		joinOnDateBehavior: datePartOnly
+		fromColumn: sales_small.OrderDate
+		toColumn: LocalDateTable_9d3e2dd8-c305-4b1c-8835-86dc75a30ce1.Date
+
+	relationship sales_small_OrderDate_Date_Date
+		fromColumn: sales_small.OrderDate
+		toColumn: Date.Date
+
+	cultureInfo en-US
+
+		linguisticMetadata = {"Version":"1.0.0","Language":"en-US"}
+			contentType: json
+
+	annotation __PBI_TimeIntelligenceEnabled = 1
+
+	annotation PBI_QueryOrder = ["sales_small"]
+
+	annotation PBI_ProTooling = ["DevMode","MCP-PBIModeling"]

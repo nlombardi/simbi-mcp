@@ -1,0 +1,89 @@
+/// Exported by Microsoft Power BI MCP (ExportTMDL)
+model Model
+	culture: en-US
+
+ref table sales
+
+table sales
+	lineageTag: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+
+	/// Row count for this table
+	measure 'Order Count' = COUNTROWS(sales)
+		formatString: #,0
+		lineageTag: b2c3d4e5-f6a7-8901-bcde-f12345678901
+
+	/// Sum of all revenue
+	measure 'Total Revenue' = SUM(sales[Revenue])
+		formatString: \$#,0.00
+		lineageTag: c3d4e5f6-a7b8-9012-cdef-123456789012
+
+	/// Average selling price per unit
+	measure 'Avg Unit Price' = DIVIDE(SUM(sales[Revenue]), SUM(sales[UnitsSold]))
+		formatString: \$#,0.00
+		lineageTag: d4e5f6a7-b8c9-0123-defa-234567890123
+
+	column OrderID
+		dataType: int64
+		lineageTag: e5f6a7b8-c9d0-1234-efab-345678901234
+		summarizeBy: none
+		sourceColumn: OrderID
+
+	column OrderDate
+		dataType: dateTime
+		lineageTag: f6a7b8c9-d0e1-2345-fabc-456789012345
+		summarizeBy: none
+		sourceColumn: OrderDate
+
+	column Region
+		dataType: string
+		lineageTag: a7b8c9d0-e1f2-3456-abcd-567890123456
+		summarizeBy: none
+		sourceColumn: Region
+
+	column Product
+		dataType: string
+		lineageTag: b8c9d0e1-f2a3-4567-bcde-678901234567
+		summarizeBy: none
+		sourceColumn: Product
+
+	column Category
+		dataType: string
+		lineageTag: c9d0e1f2-a3b4-5678-cdef-789012345678
+		summarizeBy: none
+		sourceColumn: Category
+
+	column UnitsSold
+		dataType: int64
+		lineageTag: d0e1f2a3-b4c5-6789-defa-890123456789
+		summarizeBy: sum
+		sourceColumn: UnitsSold
+
+	column UnitPrice
+		dataType: double
+		lineageTag: e1f2a3b4-c5d6-7890-efab-901234567890
+		summarizeBy: none
+		sourceColumn: UnitPrice
+
+	column Revenue
+		dataType: double
+		lineageTag: f2a3b4c5-d6e7-8901-fabc-012345678901
+		summarizeBy: sum
+		sourceColumn: Revenue
+
+	partition sales = m
+		mode: import
+		source =
+				let
+				    Source = Csv.Document(
+				        File.Contents("C:\Data\sales_small.csv"),
+				        [Delimiter=",", Columns=8, Encoding=65001, QuoteStyle=QuoteStyle.None]
+				    ),
+				    PromotedHeaders = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+				    ChangedTypes = Table.TransformColumnTypes(PromotedHeaders, {
+				        {"OrderID", Int64.Type}, {"OrderDate", type datetime},
+				        {"Region", type text}, {"Product", type text},
+				        {"Category", type text}, {"UnitsSold", Int64.Type},
+				        {"UnitPrice", type number}, {"Revenue", type number}
+				    })
+				in
+				    ChangedTypes
