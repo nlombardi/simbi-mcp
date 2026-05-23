@@ -7,6 +7,7 @@ import pytest
 from simbi_mcp.mockup.generator import generate_mockup
 from simbi_mcp.mockup.validator import ValidationError
 from simbi_mcp.types import (
+    ModelColumn,
     ModelMeasure,
     ModelSchema,
     ModelTable,
@@ -17,7 +18,7 @@ from simbi_mcp.types import (
 def schema() -> ModelSchema:
     return ModelSchema(
         tables=[
-            ModelTable(name="sales", columns=["Region", "OrderDate"]),
+            ModelTable(name="sales", columns=[ModelColumn(name="Region"), ModelColumn(name="OrderDate")]),
         ],
         measures=[
             ModelMeasure(

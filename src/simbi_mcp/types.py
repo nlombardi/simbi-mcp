@@ -53,11 +53,18 @@ class MeasurePlan(BaseModel):
     rationale: str        # why the planner chose this
 
 
+class ModelColumn(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    data_type: str = "string"
+
+
 class ModelTable(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     name: str
-    columns: list[str]
+    columns: list[ModelColumn]
 
 
 class ModelMeasure(BaseModel):

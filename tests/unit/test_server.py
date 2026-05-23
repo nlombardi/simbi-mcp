@@ -31,8 +31,9 @@ async def test_parse_schema_returns_table_columns() -> None:
     _, result = await mcp.call_tool("parse_schema", {"tmdl": _SALES_TMDL})
     data = json.loads(result["result"])
     table = next(t for t in data["tables"] if t["name"] == "sales")
-    assert "Region" in table["columns"]
-    assert "OrderDate" in table["columns"]
+    col_names = [c["name"] for c in table["columns"]]
+    assert "Region" in col_names
+    assert "OrderDate" in col_names
 
 
 async def test_parse_schema_result_roundtrips_to_model_schema() -> None:

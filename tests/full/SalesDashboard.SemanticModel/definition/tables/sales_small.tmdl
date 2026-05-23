@@ -1,0 +1,103 @@
+table sales_small
+	lineageTag: b413e652-6625-4fb9-b4d6-f9c31b7f9922
+
+	column OrderID
+		dataType: int64
+		formatString: 0
+		lineageTag: 3d8d177a-e3ad-4096-a06e-d81fef7c6135
+		summarizeBy: count
+		sourceColumn: OrderID
+
+		annotation SummarizationSetBy = Automatic
+
+	column OrderDate
+		dataType: dateTime
+		formatString: Long Date
+		lineageTag: 5af35c2a-b27a-4854-9caa-5996a2d3f052
+		summarizeBy: none
+		sourceColumn: OrderDate
+
+		variation Variation
+			isDefault
+			relationship: 5f67ddfc-bff2-403a-a89d-2dfce247cec5
+			defaultHierarchy: LocalDateTable_2d70ac87-54f3-42f7-a352-cffe341d86ba.'Date Hierarchy'
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column Region
+		dataType: string
+		lineageTag: df4b7b76-b68f-4cc2-8016-ff82b0ae5b7e
+		summarizeBy: none
+		sourceColumn: Region
+
+		annotation SummarizationSetBy = Automatic
+
+	column Product
+		dataType: string
+		lineageTag: 0e3f2af7-0305-4955-ada2-3ced78de08a1
+		summarizeBy: none
+		sourceColumn: Product
+
+		annotation SummarizationSetBy = Automatic
+
+	column Category
+		dataType: string
+		lineageTag: 8bd36eec-99ce-4cef-8406-87e76ecec5b4
+		summarizeBy: none
+		sourceColumn: Category
+
+		annotation SummarizationSetBy = Automatic
+
+	column UnitsSold
+		dataType: int64
+		formatString: 0
+		lineageTag: 29bbed14-bec1-4c9a-8e8d-62712c584e25
+		summarizeBy: sum
+		sourceColumn: UnitsSold
+
+		annotation SummarizationSetBy = Automatic
+
+	column UnitPrice
+		dataType: double
+		lineageTag: 5c25e915-0218-45b0-8257-3bc390299a55
+		summarizeBy: sum
+		sourceColumn: UnitPrice
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column Revenue
+		dataType: double
+		lineageTag: 958a779a-65cb-4ef0-a8e3-439b95afa882
+		summarizeBy: sum
+		sourceColumn: Revenue
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+
+	measure 'Order Count' = COUNTROWS(sales_small)
+		formatString: #,0
+		lineageTag: cde777a123ce426ca051
+	measure 'Total Revenue' = SUM(sales_small[Revenue])
+		formatString: \$#,0.00
+		lineageTag: e11615b8d06a4b0e97a5
+	measure 'Average Unit Price' = AVERAGE(sales_small[UnitPrice])
+		formatString: \$#,0.00
+		lineageTag: 1fd2c25a16ea47eb9c4c
+
+	partition sales_small = m
+		mode: import
+		source =
+				let
+				    Source = Csv.Document(File.Contents("Q:\Development\DataSense\Tutorials\PowerBI\test\Data\sales_small.csv"),[Delimiter=",", Columns=8, Encoding=1252, QuoteStyle=QuoteStyle.None]),
+				    #"Promoted Headers" = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+				    #"Changed Type" = Table.TransformColumnTypes(#"Promoted Headers",{{"OrderID", Int64.Type}, {"OrderDate", type date}, {"Region", type text}, {"Product", type text}, {"Category", type text}, {"UnitsSold", Int64.Type}, {"UnitPrice", type number}, {"Revenue", type number}})
+				in
+				    #"Changed Type"
+
+	annotation PBI_ResultType = Table

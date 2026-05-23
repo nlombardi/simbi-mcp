@@ -81,7 +81,7 @@ def _build_user_message(prompt: str, schema: ModelSchema) -> str:
         for m in schema.measures
     )
     table_lines = "\n".join(
-        f"  - {t.name}: columns [{', '.join(t.columns)}]"
+        f"  - {t.name}: columns [{', '.join(c.name for c in t.columns)}]"
         for t in schema.tables
     )
     return (

@@ -10,150 +10,82 @@ Both use the sample dataset at `tests/fixtures/datasets/sales_small.csv` (50 row
 
 ## Path 1 — SimBI only (no Microsoft Power BI MCP needed)
 
-SimBI parses the TMDL you provide, generates the report layout, and writes a SemanticModel stub alongside it. The stub has the right table/column/measure structure but no loaded data — visuals open in Power BI Desktop but show empty until you connect a data source.
+Claude writes the TMDL itself from your CSV description, parses it into a schema, generates the report layout, and automatically patches the measures into the SemanticModel TMDL. Visuals open in Power BI Desktop immediately — connect your CSV via **Home → Transform data** to load live data.
 
-### Step 1 — Pick an output folder
+### Step 1 — Create a blank .pbip in Power BI Desktop
 
-Create (or note) the folder where you want the report written, for example:
+1. Open Power BI Desktop
+2. **File → New** (start from a blank report)
+3. **File → Save As** — choose **"Power BI Project (.pbip)"** format and save to your target folder, e.g.:
 
-```
-C:\Reports\SalesDashboard\
-```
+   ```
+   C:\Reports\SalesDashboard\SalesDashboard.pbip
+   ```
+
+4. **Close Power BI Desktop completely** before continuing. SimBI writes the `.Report/` folder while the file is closed — any writes made while the file is open are silently discarded on reload.
 
 ### Step 2 — Paste this prompt into Claude
 
-Replace `C:\Reports\SalesDashboard` with your actual output folder path.
+Replace the paths below with your actual `.pbip` path and CSV path.
 
 ---
 
-> Call `parse_schema` with the TMDL below, then generate an annotated HTML dashboard mockup from the resulting schema, then call `emit_report` to write the project.
+> I have a CSV dataset at `C:\Reports\SalesDashboard\Data\sales_small.csv` with these columns:
+> OrderID (int), OrderDate (date), Region (text), Product (text), Category (text),
+> UnitsSold (int), UnitPrice (decimal), Revenue (decimal).
 >
-> Use `report_name = "SalesDashboard"` and `output_dir = "C:\Reports\SalesDashboard"`.
+> I have already created a blank .pbip at `C:\Reports\SalesDashboard\SalesDashboard.pbip`
+> and closed Power BI Desktop.
 >
-> The dashboard should show:
-> - Three KPI cards: Total Revenue, Order Count, Avg Unit Price
-> - A slicer on Category
-> - A column chart: Total Revenue by Region
-> - A line chart: Total Revenue over OrderDate
->
-> TMDL:
-> ```
-> /// Exported by Microsoft Power BI MCP (ExportTMDL)
-> model Model
-> 	culture: en-US
->
-> ref table sales
->
-> table sales
-> 	lineageTag: a1b2c3d4-e5f6-7890-abcd-ef1234567890
->
-> 	/// Row count for this table
-> 	measure 'Order Count' = COUNTROWS(sales)
-> 		formatString: #,0
-> 		lineageTag: b2c3d4e5-f6a7-8901-bcde-f12345678901
->
-> 	/// Sum of all revenue
-> 	measure 'Total Revenue' = SUM(sales[Revenue])
-> 		formatString: \$#,0.00
-> 		lineageTag: c3d4e5f6-a7b8-9012-cdef-123456789012
->
-> 	/// Average selling price per unit
-> 	measure 'Avg Unit Price' = DIVIDE(SUM(sales[Revenue]), SUM(sales[UnitsSold]))
-> 		formatString: \$#,0.00
-> 		lineageTag: d4e5f6a7-b8c9-0123-defa-234567890123
->
-> 	column OrderID
-> 		dataType: int64
-> 		lineageTag: e5f6a7b8-c9d0-1234-efab-345678901234
-> 		summarizeBy: none
-> 		sourceColumn: OrderID
->
-> 	column OrderDate
-> 		dataType: dateTime
-> 		lineageTag: f6a7b8c9-d0e1-2345-fabc-456789012345
-> 		summarizeBy: none
-> 		sourceColumn: OrderDate
->
-> 	column Region
-> 		dataType: string
-> 		lineageTag: a7b8c9d0-e1f2-3456-abcd-567890123456
-> 		summarizeBy: none
-> 		sourceColumn: Region
->
-> 	column Product
-> 		dataType: string
-> 		lineageTag: b8c9d0e1-f2a3-4567-bcde-678901234567
-> 		summarizeBy: none
-> 		sourceColumn: Product
->
-> 	column Category
-> 		dataType: string
-> 		lineageTag: c9d0e1f2-a3b4-5678-cdef-789012345678
-> 		summarizeBy: none
-> 		sourceColumn: Category
->
-> 	column UnitsSold
-> 		dataType: int64
-> 		lineageTag: d0e1f2a3-b4c5-6789-defa-890123456789
-> 		summarizeBy: sum
-> 		sourceColumn: UnitsSold
->
-> 	column UnitPrice
-> 		dataType: double
-> 		lineageTag: e1f2a3b4-c5d6-7890-efab-901234567890
-> 		summarizeBy: none
-> 		sourceColumn: UnitPrice
->
-> 	column Revenue
-> 		dataType: double
-> 		lineageTag: f2a3b4c5-d6e7-8901-fabc-012345678901
-> 		summarizeBy: sum
-> 		sourceColumn: Revenue
->
-> 	partition sales = m
-> 		mode: import
-> 		source =
-> 				let
-> 				    Source = Csv.Document(
-> 				        File.Contents("C:\Data\sales_small.csv"),
-> 				        [Delimiter=",", Columns=8, Encoding=65001, QuoteStyle=QuoteStyle.None]
-> 				    ),
-> 				    PromotedHeaders = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
-> 				    ChangedTypes = Table.TransformColumnTypes(PromotedHeaders, {
-> 				        {"OrderID", Int64.Type}, {"OrderDate", type datetime},
-> 				        {"Region", type text}, {"Product", type text},
-> 				        {"Category", type text}, {"UnitsSold", Int64.Type},
-> 				        {"UnitPrice", type number}, {"Revenue", type number}
-> 				    })
-> 				in
-> 				    ChangedTypes
-> ```
+> Using SimBI (Path 1 — no Power BI MCP):
+> 1. Write TMDL for a table named `sales` with the correct column dataTypes and these
+>    measures (with DAX and formatStrings):
+>    - `Total Revenue = SUM(sales[Revenue])`  format: `\$#,0.00`
+>    - `Order Count = COUNTROWS(sales)`  format: `#,0`
+>    - `Avg Unit Price = DIVIDE(SUM(sales[Revenue]), SUM(sales[UnitsSold]))`  format: `\$#,0.00`
+>    Include a partition block pointing at `C:\Reports\SalesDashboard\Data\sales_small.csv`.
+>    Do NOT call the Power BI MCP — write the TMDL as inline text yourself.
+> 2. Call `parse_schema` with that TMDL.
+> 3. Generate annotated HTML using the schema and `dashboard.css` layout classes
+>    (`db-page`, `db-grid`, `db-card`, `db-chart-area`) so every visual has real CSS
+>    dimensions. The dashboard should show:
+>    - Three KPI cards: Total Revenue, Order Count, Avg Unit Price
+>    - A slicer on Category
+>    - A column chart: Total Revenue by Region
+>    - A line chart: Total Revenue over OrderDate
+> 4. Call `validate_mockup_html` to lint the HTML.
+> 5. Call `emit_report` with `pbip_path = "C:\Reports\SalesDashboard\SalesDashboard.pbip"`.
 
 ---
 
 ### What Claude should do
 
-1. Call `parse_schema` with the TMDL above
-2. Generate annotated HTML in-context (6 `data-pbi` elements)
-3. Call `emit_report` — it will return the path to `SalesDashboard.pbip`
+1. Write TMDL inline (no MCP calls) — columns, measures, partition pointing at the CSV
+2. Call `parse_schema` with that inline TMDL
+3. Generate annotated HTML with 6 `data-pbi` elements
+4. Call `validate_mockup_html`
+5. Call `emit_report` — which writes the `.Report/` folder **and** patches the measures into the SemanticModel TMDL automatically
 
 ### Expected output
 
 ```
 C:\Reports\SalesDashboard\
-  SalesDashboard.pbip                   ← open this in Power BI Desktop
-  SalesDashboard.Report\                ← PBIR layout (6 visual.json files)
-  SalesDashboard.SemanticModel\         ← stub: correct types, no loaded data
-    definition.pbism
-    model.bim
+  SalesDashboard.pbip                       ← you created this; SimBI left it untouched
+  SalesDashboard.Report\                    ← PBIR layout (6 visual.json files)
+    definition\
+      pages\<guid>\visuals\
+  SalesDashboard.SemanticModel\             ← created by PBI Desktop; measures patched in
+    definition\
+      tables\
+        sales.tmdl                          ← measures appended by SimBI
 ```
 
 ### What to check
 
-- Open `SalesDashboard.pbip` in Power BI Desktop — the layout should render with 6 visuals
-- Visuals will be empty (no data) — this is expected for Path 1
-- No DAX type errors — the stub now writes `double` for Revenue, `dateTime` for OrderDate, etc.
-- In Power BI Desktop: **Home → Transform data** to connect `sales_small.csv` as the data source, then refresh
+- Open `SalesDashboard.pbip` fresh in Power BI Desktop — the layout should render with 6 visuals
+- Measures appear in the Fields pane (Total Revenue, Order Count, Avg Unit Price)
+- Visuals will be empty until data is connected — this is expected for Path 1
+- In Power BI Desktop: **Home → Transform data** to connect `sales_small.csv`, then refresh
 
 ---
 
@@ -262,6 +194,8 @@ C:\Reports\SalesDashboard\
 | `N visuals have zero width/height` | HTML elements have no CSS dimensions | Add `db-card` / `db-chart-area` classes; don't use bare unstyled `<div>`s |
 | Visuals missing / blank page after reload | `emit_report` ran while Power BI Desktop was open | Close PBI Desktop, re-run `emit_report`, open fresh |
 | `Unknown measure` validation error | Claude used a measure name not in the schema | Check measure names in schema match HTML (`Total Revenue`, `Order Count`, `Avg Unit Price`) |
-| Measures and relationships missing on open | TMDL not synced to disk before closing | Re-run ExportToTmdlFolder → SemanticModel/definition, then close and reopen |
-| Visuals are empty (Path 1) | Stub has no loaded data | Expected — connect data source in Power BI Desktop |
-| `AVERAGE cannot work with values of type String` | Stale stub from before the dataType fix | Delete the old `SalesDashboard.SemanticModel\` folder and re-run `emit_report` |
+| Measures and relationships missing on open (Path 2) | TMDL not synced to disk before closing | Re-run ExportToTmdlFolder → SemanticModel/definition, then close and reopen |
+| Visuals are empty (Path 1) | No data connected yet | Expected — use **Home → Transform data** to connect the CSV, then refresh |
+| Measures missing from Fields pane (Path 1) | `emit_report` was called before the `.pbip` existed | Create the blank `.pbip` in Power BI Desktop first, then re-run `emit_report` |
+| Claude calls Power BI MCP instead of writing TMDL | Claude chose Path 2 by mistake | Restart the conversation; tell Claude explicitly "use SimBI Path 1, no Power BI MCP" |
+| `AVERAGE cannot work with values of type String` | Stale SemanticModel from before the dataType fix | Delete the old `SalesDashboard.SemanticModel\` folder and re-run `emit_report` |

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Report",
+    "displayName": "ReferenceDashboard.pbib"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "d7b32150-8e16-4b3c-bb00-fe507afc8d6d"
+  }
+}

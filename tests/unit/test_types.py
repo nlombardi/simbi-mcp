@@ -7,6 +7,7 @@ from simbi_mcp.types import (
     ColumnRole,
     DatasetProfile,
     MeasurePlan,
+    ModelColumn,
     ModelMeasure,
     ModelSchema,
     ModelTable,
@@ -68,7 +69,7 @@ class TestModelSchema:
             tables=[
                 ModelTable(
                     name="sales",
-                    columns=["Revenue", "Region"],
+                    columns=[ModelColumn(name="Revenue"), ModelColumn(name="Region")],
                 ),
             ],
             measures=[

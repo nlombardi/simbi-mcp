@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "SemanticModel",
+    "displayName": "ReferenceDashboard.pbib"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "d1511d7f-361c-4666-b598-79f6e9af53f8"
+  }
+}

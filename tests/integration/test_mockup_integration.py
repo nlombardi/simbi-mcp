@@ -11,6 +11,7 @@ from anthropic import Anthropic
 
 from simbi_mcp.mockup.generator import generate_mockup
 from simbi_mcp.types import (
+    ModelColumn,
     ModelMeasure,
     ModelSchema,
     ModelTable,
@@ -25,7 +26,7 @@ def schema() -> ModelSchema:
         tables=[
             ModelTable(
                 name="sales",
-                columns=["Region", "Category", "OrderDate"],
+                columns=[ModelColumn(name="Region"), ModelColumn(name="Category"), ModelColumn(name="OrderDate")],
             ),
         ],
         measures=[
