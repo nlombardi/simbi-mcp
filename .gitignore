@@ -12,3 +12,6 @@ spikes/.venv/
 .claude
 docs
 .vscode
+
+# Power BI Desktop per-user state (DPAPI-encrypted, machine-bound, regenerated on open)
+**/.pbi/
