@@ -45,8 +45,8 @@ SimBI chains three phases into two MCP tools and one resource:
 ## Installation
 
 ```bash
-git clone <repo>
-cd "SimBI MCP"
+git clone https://gitlab.com/ds-simbi/simbi-mcp.git
+cd simbi-mcp
 uv sync
 ```
 
@@ -291,3 +291,7 @@ src/simbi_mcp/
 | `lineChart` | Line chart | `data-pbi-axis`, `data-pbi-values`, `data-pbi-series` (optional) |
 | `slicer` | Button slicer | `data-pbi-field` |
 | `table` | Table | `data-pbi-columns` (comma-separated — each token is either a bare measure name or a `Table[Column]` ref) |
+
+## License
+
+[MIT](LICENSE) © Nick Lombardi
