@@ -132,16 +132,23 @@ def test_theme_json_present_and_non_empty(
     tmp_path: Path, sample_visuals: list[dict[str, Any]]
 ) -> None:
     write_report(visuals=sample_visuals, report_name="TestReport", output_dir=tmp_path)
+    # Default theme name is SimBIDefault — resolves Microsoft CY25SU10 base +
+    # SimBI visualStyles opinions into a single emitted theme file.
     theme_path = (
         tmp_path
         / "TestReport.Report"
         / "StaticResources"
         / "SharedResources"
         / "BaseThemes"
-        / "CY25SU10.json"
+        / "SimBIDefault.json"
     )
     assert theme_path.exists()
     assert theme_path.stat().st_size > 1000
+    theme_content = json.loads(theme_path.read_text())
+    # Microsoft colour science preserved
+    assert theme_content["dataColors"][0].upper() == "#118DFF"
+    # SimBI visualStyles opinion present
+    assert theme_content["visualStyles"]
 
 
 def test_report_json_has_theme_collection(
@@ -151,8 +158,41 @@ def test_report_json_has_theme_collection(
     content = json.loads(
         (tmp_path / "TestReport.Report" / "definition" / "report.json").read_text()
     )
-    assert content["themeCollection"]["baseTheme"]["name"] == "CY25SU10"
+    assert content["themeCollection"]["baseTheme"]["name"] == "SimBIDefault"
     assert "settings" in content
+
+
+def test_write_report_with_user_theme_override(
+    tmp_path: Path, sample_visuals: list[dict[str, Any]]
+) -> None:
+    """User theme deep-merges onto SimBI default; brand colours win, visualStyles preserved."""
+    from simbi_mcp.pbir.theme import resolve_theme
+    user = tmp_path / "brand.json"
+    user.write_text(json.dumps({
+        "name": "AcmeBrand",
+        "dataColors": ["#FF0000", "#00FF00", "#0000FF"],
+    }))
+    theme = resolve_theme(user_theme_path=user)
+    write_report(
+        visuals=sample_visuals,
+        report_name="TestReport",
+        output_dir=tmp_path,
+        theme=theme,
+    )
+    # Resolved theme is written under the user-supplied name
+    emitted = json.loads(
+        (
+            tmp_path / "TestReport.Report" / "StaticResources" / "SharedResources"
+            / "BaseThemes" / "AcmeBrand.json"
+        ).read_text()
+    )
+    assert emitted["dataColors"] == ["#FF0000", "#00FF00", "#0000FF"]
+    assert emitted["visualStyles"]  # SimBI opinions preserved
+    # report.json references the user theme name
+    report_json = json.loads(
+        (tmp_path / "TestReport.Report" / "definition" / "report.json").read_text()
+    )
+    assert report_json["themeCollection"]["baseTheme"]["name"] == "AcmeBrand"
 
 
 def test_write_report_does_not_create_pbip(
