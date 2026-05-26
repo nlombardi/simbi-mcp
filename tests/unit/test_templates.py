@@ -398,3 +398,268 @@ def test_donut_chart(schema: ModelSchema) -> None:
     assert qs["Category"]["projections"][0]["field"]["Column"]["Property"] == "Region"
     assert "Y" in qs
     assert qs["Y"]["projections"][0]["field"]["Measure"]["Property"] == "Total Revenue"
+
+
+# ---------- Pass-2 visuals (KPI, Multi-row Card, Gauge, Dot Plot, Combo,
+# Treemap, Funnel, Histogram, Scatter, Bubble, Waterfall, Ribbon, Map,
+# Filled Map, Shape Map) ----------
+
+
+@pytest.fixture
+def rich_schema() -> ModelSchema:
+    """Schema with the extra columns/measures needed by Pass-2 visual tests."""
+    return ModelSchema(
+        tables=[
+            ModelTable(
+                name="sales",
+                columns=[
+                    ModelColumn(name="Region"),
+                    ModelColumn(name="OrderDate"),
+                    ModelColumn(name="Stage"),
+                    ModelColumn(name="Market"),
+                    ModelColumn(name="Driver"),
+                    ModelColumn(name="Category"),
+                    ModelColumn(name="City"),
+                    ModelColumn(name="Country"),
+                    ModelColumn(name="Territory"),
+                ],
+            )
+        ],
+        measures=[
+            ModelMeasure(name="Total Revenue", table="sales", expression="SUM(sales[Revenue])", return_type="currency"),
+            ModelMeasure(name="Order Count", table="sales", expression="COUNTROWS(sales)", return_type="integer"),
+            ModelMeasure(name="Revenue Target", table="sales", expression="1000000", return_type="currency"),
+            ModelMeasure(name="Gross Margin", table="sales", expression="0.4", return_type="percentage"),
+            ModelMeasure(name="Lead Count", table="sales", expression="COUNTROWS(sales)", return_type="integer"),
+            ModelMeasure(name="Ad Spend", table="sales", expression="SUM(sales[Spend])", return_type="currency"),
+            ModelMeasure(name="Variance", table="sales", expression="0", return_type="currency"),
+            ModelMeasure(name="Order Value", table="sales", expression="AVERAGE(sales[Revenue])", return_type="currency"),
+        ],
+        relationships=[],
+    )
+
+
+def _node(vtype: str, **attrs: str) -> VisualNode:
+    return VisualNode(
+        x=0, y=0, width=400, height=300,
+        attrs={"data-pbi": vtype, **attrs},
+    )
+
+
+def test_multi_row_card_emits_projection_per_measure(rich_schema: ModelSchema) -> None:
+    node = _node("multiRowCard", **{"data-pbi-measures": "Total Revenue,Order Count"})
+    result = build_visual_json(node, z_order=0, schema=rich_schema)
+    assert result["visual"]["visualType"] == "multiRowCard"
+    projs = result["visual"]["query"]["queryState"]["Values"]["projections"]
+    assert [p["field"]["Measure"]["Property"] for p in projs] == ["Total Revenue", "Order Count"]
+
+
+def test_kpi_emits_indicator_trend_and_goal(rich_schema: ModelSchema) -> None:
+    node = _node(
+        "kpi",
+        **{
+            "data-pbi-measure": "Total Revenue",
+            "data-pbi-target": "Revenue Target",
+            "data-pbi-trend": "sales[OrderDate]",
+        },
+    )
+    result = build_visual_json(node, z_order=0, schema=rich_schema)
+    assert result["visual"]["visualType"] == "kpi"
+    qs = result["visual"]["query"]["queryState"]
+    assert qs["Indicator"]["projections"][0]["field"]["Measure"]["Property"] == "Total Revenue"
+    assert qs["TrendLine"]["projections"][0]["field"]["Column"]["Property"] == "OrderDate"
+    assert qs["Goals"]["projections"][0]["field"]["Measure"]["Property"] == "Revenue Target"
+
+
+def test_gauge_minimum_required_attrs(rich_schema: ModelSchema) -> None:
+    node = _node("gauge", **{"data-pbi-measure": "Total Revenue"})
+    result = build_visual_json(node, z_order=0, schema=rich_schema)
+    qs = result["visual"]["query"]["queryState"]
+    assert "Y" in qs
+    assert "MinValue" not in qs and "MaxValue" not in qs and "TargetValue" not in qs
+
+
+def test_gauge_with_optional_target_and_max(rich_schema: ModelSchema) -> None:
+    node = _node(
+        "gauge",
+        **{
+            "data-pbi-measure": "Total Revenue",
+            "data-pbi-max": "Revenue Target",
+            "data-pbi-target": "Revenue Target",
+        },
+    )
+    result = build_visual_json(node, z_order=0, schema=rich_schema)
+    qs = result["visual"]["query"]["queryState"]
+    assert qs["MaxValue"]["projections"][0]["field"]["Measure"]["Property"] == "Revenue Target"
+    assert qs["TargetValue"]["projections"][0]["field"]["Measure"]["Property"] == "Revenue Target"
+
+
+def test_dot_plot(rich_schema: ModelSchema) -> None:
+    node = _node("dotPlot", **{"data-pbi-axis": "sales[Region]", "data-pbi-values": "Total Revenue"})
+    result = build_visual_json(node, z_order=0, schema=rich_schema)
+    assert result["visual"]["visualType"] == "dotPlot"
+    qs = result["visual"]["query"]["queryState"]
+    assert qs["Category"]["projections"][0]["field"]["Column"]["Property"] == "Region"
+    assert qs["X"]["projections"][0]["field"]["Measure"]["Property"] == "Total Revenue"
+
+
+def test_combo_chart_dual_measures(rich_schema: ModelSchema) -> None:
+    node = _node(
+        "comboChart",
+        **{
+            "data-pbi-axis": "sales[OrderDate]",
+            "data-pbi-column-values": "Total Revenue",
+            "data-pbi-line-values": "Gross Margin",
+        },
+    )
+    result = build_visual_json(node, z_order=0, schema=rich_schema)
+    assert result["visual"]["visualType"] == "lineClusteredColumnComboChart"
+    qs = result["visual"]["query"]["queryState"]
+    assert qs["Y"]["projections"][0]["field"]["Measure"]["Property"] == "Total Revenue"
+    assert qs["Y2"]["projections"][0]["field"]["Measure"]["Property"] == "Gross Margin"
+
+
+def test_treemap_with_details(rich_schema: ModelSchema) -> None:
+    node = _node(
+        "treemap",
+        **{
+            "data-pbi-group": "sales[Region]",
+            "data-pbi-values": "Total Revenue",
+            "data-pbi-details": "sales[Category]",
+        },
+    )
+    result = build_visual_json(node, z_order=0, schema=rich_schema)
+    assert result["visual"]["visualType"] == "treemap"
+    qs = result["visual"]["query"]["queryState"]
+    assert qs["Group"]["projections"][0]["field"]["Column"]["Property"] == "Region"
+    assert qs["Details"]["projections"][0]["field"]["Column"]["Property"] == "Category"
+    assert qs["Values"]["projections"][0]["field"]["Measure"]["Property"] == "Total Revenue"
+
+
+def test_funnel_chart(rich_schema: ModelSchema) -> None:
+    node = _node("funnelChart", **{"data-pbi-axis": "sales[Stage]", "data-pbi-values": "Lead Count"})
+    result = build_visual_json(node, z_order=0, schema=rich_schema)
+    # Annotation token is "funnelChart" but PBIR visualType is "funnel"
+    assert result["visual"]["visualType"] == "funnel"
+
+
+def test_histogram_default(rich_schema: ModelSchema) -> None:
+    node = _node("histogram", **{"data-pbi-values": "Order Value"})
+    result = build_visual_json(node, z_order=0, schema=rich_schema)
+    assert result["visual"]["visualType"] == "barChart"
+    assert "objects" not in result["visual"] or "categoryAxis" not in result["visual"].get("objects", {})
+
+
+def test_histogram_with_bins(rich_schema: ModelSchema) -> None:
+    node = _node("histogram", **{"data-pbi-values": "Order Value", "data-pbi-bins": "20"})
+    result = build_visual_json(node, z_order=0, schema=rich_schema)
+    assert result["visual"]["visualType"] == "barChart"
+    assert result["visual"]["objects"]["categoryAxis"][0]["properties"]["binCount"]
+
+
+def test_histogram_invalid_bins_raises(rich_schema: ModelSchema) -> None:
+    node = _node("histogram", **{"data-pbi-values": "Order Value", "data-pbi-bins": "not-an-int"})
+    with pytest.raises(ValueError, match="data-pbi-bins"):
+        build_visual_json(node, z_order=0, schema=rich_schema)
+
+
+def test_scatter_chart(rich_schema: ModelSchema) -> None:
+    node = _node(
+        "scatterChart",
+        **{"data-pbi-x": "Ad Spend", "data-pbi-y": "Total Revenue", "data-pbi-details": "sales[Market]"},
+    )
+    result = build_visual_json(node, z_order=0, schema=rich_schema)
+    assert result["visual"]["visualType"] == "scatterChart"
+    qs = result["visual"]["query"]["queryState"]
+    assert qs["X"]["projections"][0]["field"]["Measure"]["Property"] == "Ad Spend"
+    assert qs["Y"]["projections"][0]["field"]["Measure"]["Property"] == "Total Revenue"
+    assert qs["Details"]["projections"][0]["field"]["Column"]["Property"] == "Market"
+    assert "Size" not in qs
+
+
+def test_bubble_chart_adds_size(rich_schema: ModelSchema) -> None:
+    node = _node(
+        "bubbleChart",
+        **{
+            "data-pbi-x": "Ad Spend",
+            "data-pbi-y": "Total Revenue",
+            "data-pbi-size": "Order Count",
+        },
+    )
+    result = build_visual_json(node, z_order=0, schema=rich_schema)
+    # Catalog-confirmed: bubble shares the scatterChart PBIR visualType
+    assert result["visual"]["visualType"] == "scatterChart"
+    qs = result["visual"]["query"]["queryState"]
+    assert qs["Size"]["projections"][0]["field"]["Measure"]["Property"] == "Order Count"
+
+
+def test_waterfall_with_breakdown(rich_schema: ModelSchema) -> None:
+    node = _node(
+        "waterfallChart",
+        **{
+            "data-pbi-axis": "sales[Driver]",
+            "data-pbi-values": "Variance",
+            "data-pbi-breakdown": "sales[Category]",
+        },
+    )
+    result = build_visual_json(node, z_order=0, schema=rich_schema)
+    assert result["visual"]["visualType"] == "waterfallChart"
+    qs = result["visual"]["query"]["queryState"]
+    assert qs["Breakdown"]["projections"][0]["field"]["Column"]["Property"] == "Category"
+
+
+def test_ribbon_chart(rich_schema: ModelSchema) -> None:
+    node = _node(
+        "ribbonChart",
+        **{
+            "data-pbi-axis": "sales[OrderDate]",
+            "data-pbi-values": "Total Revenue",
+            "data-pbi-series": "sales[Category]",
+        },
+    )
+    result = build_visual_json(node, z_order=0, schema=rich_schema)
+    assert result["visual"]["visualType"] == "ribbonChart"
+    qs = result["visual"]["query"]["queryState"]
+    assert qs["Series"]["projections"][0]["field"]["Column"]["Property"] == "Category"
+
+
+def test_map_with_legend(rich_schema: ModelSchema) -> None:
+    node = _node(
+        "map",
+        **{
+            "data-pbi-location": "sales[City]",
+            "data-pbi-size": "Total Revenue",
+            "data-pbi-legend": "sales[Category]",
+        },
+    )
+    result = build_visual_json(node, z_order=0, schema=rich_schema)
+    assert result["visual"]["visualType"] == "map"
+    qs = result["visual"]["query"]["queryState"]
+    assert qs["Location"]["projections"][0]["field"]["Column"]["Property"] == "City"
+    assert qs["Size"]["projections"][0]["field"]["Measure"]["Property"] == "Total Revenue"
+    assert qs["Legend"]["projections"][0]["field"]["Column"]["Property"] == "Category"
+
+
+def test_filled_map(rich_schema: ModelSchema) -> None:
+    node = _node(
+        "filledMap",
+        **{"data-pbi-location": "sales[Country]", "data-pbi-color-saturation": "Total Revenue"},
+    )
+    result = build_visual_json(node, z_order=0, schema=rich_schema)
+    assert result["visual"]["visualType"] == "filledMap"
+    qs = result["visual"]["query"]["queryState"]
+    assert qs["Color saturation"]["projections"][0]["field"]["Measure"]["Property"] == "Total Revenue"
+
+
+def test_shape_map_with_topojson(rich_schema: ModelSchema) -> None:
+    node = _node(
+        "shapeMap",
+        **{
+            "data-pbi-location": "sales[Territory]",
+            "data-pbi-color-saturation": "Total Revenue",
+            "data-pbi-topojson": "C:/maps/territories.json",
+        },
+    )
+    result = build_visual_json(node, z_order=0, schema=rich_schema)
+    assert result["visual"]["visualType"] == "shapeMap"
+    assert "mapShape" in result["visual"]["objects"]

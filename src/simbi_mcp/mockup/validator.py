@@ -63,6 +63,66 @@ _EXAMPLES: dict[VisualType, str] = {
         '<div data-pbi="donutChart" data-pbi-axis="sales[Region]" '
         'data-pbi-values="Total Revenue"></div>'
     ),
+    VisualType.MULTI_ROW_CARD: (
+        '<div data-pbi="multiRowCard" '
+        'data-pbi-measures="Total Revenue,Order Count"></div>'
+    ),
+    VisualType.KPI: (
+        '<div data-pbi="kpi" data-pbi-measure="Total Revenue" '
+        'data-pbi-target="Revenue Target" data-pbi-trend="sales[OrderDate]"></div>'
+    ),
+    VisualType.GAUGE: (
+        '<div data-pbi="gauge" data-pbi-measure="Total Revenue" '
+        'data-pbi-target="Revenue Target"></div>'
+    ),
+    VisualType.DOT_PLOT: (
+        '<div data-pbi="dotPlot" data-pbi-axis="sales[Region]" '
+        'data-pbi-values="Total Revenue"></div>'
+    ),
+    VisualType.COMBO_CHART: (
+        '<div data-pbi="comboChart" data-pbi-axis="sales[OrderDate]" '
+        'data-pbi-column-values="Total Revenue" data-pbi-line-values="Gross Margin"></div>'
+    ),
+    VisualType.TREEMAP: (
+        '<div data-pbi="treemap" data-pbi-group="sales[Region]" '
+        'data-pbi-values="Total Revenue"></div>'
+    ),
+    VisualType.FUNNEL_CHART: (
+        '<div data-pbi="funnelChart" data-pbi-axis="sales[Stage]" '
+        'data-pbi-values="Lead Count"></div>'
+    ),
+    VisualType.HISTOGRAM: (
+        '<div data-pbi="histogram" data-pbi-values="Order Value" data-pbi-bins="20"></div>'
+    ),
+    VisualType.SCATTER_CHART: (
+        '<div data-pbi="scatterChart" data-pbi-x="Ad Spend" '
+        'data-pbi-y="Total Revenue" data-pbi-details="sales[Market]"></div>'
+    ),
+    VisualType.BUBBLE_CHART: (
+        '<div data-pbi="bubbleChart" data-pbi-x="Ad Spend" '
+        'data-pbi-y="Total Revenue" data-pbi-size="Order Count" '
+        'data-pbi-details="sales[Market]"></div>'
+    ),
+    VisualType.WATERFALL_CHART: (
+        '<div data-pbi="waterfallChart" data-pbi-axis="sales[Driver]" '
+        'data-pbi-values="Variance"></div>'
+    ),
+    VisualType.RIBBON_CHART: (
+        '<div data-pbi="ribbonChart" data-pbi-axis="sales[OrderDate]" '
+        'data-pbi-values="Total Revenue" data-pbi-series="sales[Category]"></div>'
+    ),
+    VisualType.MAP: (
+        '<div data-pbi="map" data-pbi-location="sales[City]" '
+        'data-pbi-size="Total Revenue"></div>'
+    ),
+    VisualType.FILLED_MAP: (
+        '<div data-pbi="filledMap" data-pbi-location="sales[Country]" '
+        'data-pbi-color-saturation="Total Revenue"></div>'
+    ),
+    VisualType.SHAPE_MAP: (
+        '<div data-pbi="shapeMap" data-pbi-location="sales[Territory]" '
+        'data-pbi-color-saturation="Total Revenue"></div>'
+    ),
 }
 
 
@@ -156,6 +216,14 @@ def _validate_node(attrs: dict[str, str], schema: ModelSchema) -> None:
                 _check_column_ref(token, schema, "data-pbi-columns", vtype)
             else:
                 _check_measure(token, schema, "data-pbi-columns", vtype)
+
+    # Validate multiRowCard measure list — every token must be a measure name.
+    if vtype is VisualType.MULTI_ROW_CARD:
+        for token in attrs.get("data-pbi-measures", "").split(","):
+            token = token.strip()
+            if not token:
+                continue
+            _check_measure(token, schema, "data-pbi-measures", vtype)
 
 
 def _check_measure(name: str, schema: ModelSchema, attr: str, vtype: VisualType) -> None:

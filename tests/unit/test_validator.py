@@ -53,7 +53,9 @@ def test_invalid_measures_raises(schema: ModelSchema, fixtures_html: Path) -> No
 
 
 def test_unknown_visual_type_raises(schema: ModelSchema) -> None:
-    html = '<div data-pbi="funnelChart" data-pbi-measure="Total Revenue"></div>'
+    # decompositionTree is permanently out-of-scope (AI service-only per roadmap),
+    # so it stays a safe "definitely unknown" placeholder.
+    html = '<div data-pbi="decompositionTree" data-pbi-measure="Total Revenue"></div>'
     with pytest.raises(ValidationError, match="Unknown data-pbi value"):
         validate_mockup(html, schema)
 
@@ -213,4 +215,53 @@ def test_table_visual_rejects_unknown_table_in_mixed_list(schema: ModelSchema) -
         'data-pbi-columns="FakeTable[Region],Total Revenue"></div>'
     )
     with pytest.raises(ValidationError, match="FakeTable"):
+        validate_mockup(html, schema)
+
+
+# ---------- Pass-2 visual validation ----------
+
+
+def test_multi_row_card_accepts_known_measures(schema: ModelSchema) -> None:
+    html = '<div data-pbi="multiRowCard" data-pbi-measures="Total Revenue, Order Count"></div>'
+    validate_mockup(html, schema)
+
+
+def test_multi_row_card_rejects_unknown_measure(schema: ModelSchema) -> None:
+    html = '<div data-pbi="multiRowCard" data-pbi-measures="Total Revenue,GhostMeasure"></div>'
+    with pytest.raises(ValidationError, match="GhostMeasure"):
+        validate_mockup(html, schema)
+
+
+def test_kpi_validates_target_measure_and_trend_column(schema: ModelSchema) -> None:
+    html = (
+        '<div data-pbi="kpi" data-pbi-measure="Total Revenue" '
+        'data-pbi-target="GhostTarget" data-pbi-trend="sales[OrderDate]"></div>'
+    )
+    with pytest.raises(ValidationError, match="GhostTarget"):
+        validate_mockup(html, schema)
+
+
+def test_scatter_chart_rejects_unknown_x_measure(schema: ModelSchema) -> None:
+    html = (
+        '<div data-pbi="scatterChart" data-pbi-x="GhostMeasure" '
+        'data-pbi-y="Total Revenue"></div>'
+    )
+    with pytest.raises(ValidationError, match="GhostMeasure"):
+        validate_mockup(html, schema)
+
+
+def test_treemap_with_optional_details_accepts(schema: ModelSchema) -> None:
+    html = (
+        '<div data-pbi="treemap" data-pbi-group="sales[Region]" '
+        'data-pbi-values="Total Revenue" data-pbi-details="sales[OrderDate]"></div>'
+    )
+    validate_mockup(html, schema)
+
+
+def test_filled_map_validates_color_saturation_measure(schema: ModelSchema) -> None:
+    html = (
+        '<div data-pbi="filledMap" data-pbi-location="sales[Region]" '
+        'data-pbi-color-saturation="GhostMeasure"></div>'
+    )
+    with pytest.raises(ValidationError, match="GhostMeasure"):
         validate_mockup(html, schema)

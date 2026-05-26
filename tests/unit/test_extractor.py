@@ -90,7 +90,9 @@ def test_visual_node_is_frozen() -> None:
 
 
 def test_parse_js_nodes_invalid_visual_type_raises_on_access() -> None:
-    raw = [{"x": 0, "y": 0, "width": 100, "height": 100, "data": {"data-pbi": "funnelChart"}}]
+    # decompositionTree is permanently out-of-scope (AI service-only per roadmap),
+    # so it stays a safe "definitely unknown" placeholder.
+    raw = [{"x": 0, "y": 0, "width": 100, "height": 100, "data": {"data-pbi": "decompositionTree"}}]
     nodes = _parse_js_nodes(raw)
-    with pytest.raises(ValueError, match="funnelChart"):
+    with pytest.raises(ValueError, match="decompositionTree"):
         _ = nodes[0].visual_type
