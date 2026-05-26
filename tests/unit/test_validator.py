@@ -53,8 +53,89 @@ def test_invalid_measures_raises(schema: ModelSchema, fixtures_html: Path) -> No
 
 
 def test_unknown_visual_type_raises(schema: ModelSchema) -> None:
-    html = '<div data-pbi="pieChart" data-pbi-measure="Total Revenue"></div>'
+    html = '<div data-pbi="funnelChart" data-pbi-measure="Total Revenue"></div>'
     with pytest.raises(ValidationError, match="Unknown data-pbi value"):
+        validate_mockup(html, schema)
+
+
+def test_clustered_and_stacked_column_charts_pass(schema: ModelSchema) -> None:
+    html_clustered = (
+        '<div data-pbi="clusteredColumnChart" '
+        'data-pbi-axis="sales[Region]" '
+        'data-pbi-values="Total Revenue" '
+        'data-pbi-series="sales[OrderDate]"></div>'
+    )
+    validate_mockup(html_clustered, schema)  # must not raise
+
+    html_stacked = (
+        '<div data-pbi="columnChart" '
+        'data-pbi-axis="sales[Region]" '
+        'data-pbi-values="Total Revenue" '
+        'data-pbi-series="sales[OrderDate]"></div>'
+    )
+    validate_mockup(html_stacked, schema)  # must not raise
+
+    html_clustered_bar = (
+        '<div data-pbi="clusteredBarChart" '
+        'data-pbi-axis="sales[Region]" '
+        'data-pbi-values="Total Revenue" '
+        'data-pbi-series="sales[OrderDate]"></div>'
+    )
+    validate_mockup(html_clustered_bar, schema)  # must not raise
+
+    html_stacked_bar = (
+        '<div data-pbi="barChart" '
+        'data-pbi-axis="sales[Region]" '
+        'data-pbi-values="Total Revenue" '
+        'data-pbi-series="sales[OrderDate]"></div>'
+    )
+    validate_mockup(html_stacked_bar, schema)  # must not raise
+
+    html_hundred_percent_stacked_column = (
+        '<div data-pbi="hundredPercentStackedColumnChart" '
+        'data-pbi-axis="sales[Region]" '
+        'data-pbi-values="Total Revenue" '
+        'data-pbi-series="sales[OrderDate]"></div>'
+    )
+    validate_mockup(html_hundred_percent_stacked_column, schema)  # must not raise
+
+    html_hundred_percent_stacked_bar = (
+        '<div data-pbi="hundredPercentStackedBarChart" '
+        'data-pbi-axis="sales[Region]" '
+        'data-pbi-values="Total Revenue" '
+        'data-pbi-series="sales[OrderDate]"></div>'
+    )
+    validate_mockup(html_hundred_percent_stacked_bar, schema)  # must not raise
+
+    html_area = (
+        '<div data-pbi="areaChart" '
+        'data-pbi-axis="sales[OrderDate]" '
+        'data-pbi-values="Total Revenue"></div>'
+    )
+    validate_mockup(html_area, schema)  # must not raise
+
+    html_pie = (
+        '<div data-pbi="pieChart" '
+        'data-pbi-axis="sales[Region]" '
+        'data-pbi-values="Total Revenue"></div>'
+    )
+    validate_mockup(html_pie, schema)  # must not raise
+
+    html_donut = (
+        '<div data-pbi="donutChart" '
+        'data-pbi-axis="sales[Region]" '
+        'data-pbi-values="Total Revenue"></div>'
+    )
+    validate_mockup(html_donut, schema)  # must not raise
+
+
+def test_clustered_column_chart_missing_series_raises(schema: ModelSchema) -> None:
+    html = (
+        '<div data-pbi="clusteredColumnChart" '
+        'data-pbi-axis="sales[Region]" '
+        'data-pbi-values="Total Revenue"></div>'
+    )
+    with pytest.raises(ValidationError, match="data-pbi-series"):
         validate_mockup(html, schema)
 
 

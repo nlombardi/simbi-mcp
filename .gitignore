@@ -15,3 +15,4 @@ docs
 
 # Power BI Desktop per-user state (DPAPI-encrypted, machine-bound, regenerated on open)
 **/.pbi/
+resources/
