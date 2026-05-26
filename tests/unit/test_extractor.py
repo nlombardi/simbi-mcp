@@ -90,7 +90,7 @@ def test_visual_node_is_frozen() -> None:
 
 
 def test_parse_js_nodes_invalid_visual_type_raises_on_access() -> None:
-    raw = [{"x": 0, "y": 0, "width": 100, "height": 100, "data": {"data-pbi": "pieChart"}}]
+    raw = [{"x": 0, "y": 0, "width": 100, "height": 100, "data": {"data-pbi": "funnelChart"}}]
     nodes = _parse_js_nodes(raw)
-    with pytest.raises(ValueError, match="pieChart"):
+    with pytest.raises(ValueError, match="funnelChart"):
         _ = nodes[0].visual_type

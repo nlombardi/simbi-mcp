@@ -215,3 +215,186 @@ def test_invalid_column_ref_raises(schema: ModelSchema) -> None:
     )
     with pytest.raises(ValueError, match="Invalid column reference"):
         build_visual_json(node, z_order=0, schema=schema)
+
+
+def test_clustered_column_chart(schema: ModelSchema) -> None:
+    node = VisualNode(
+        x=0, y=0, width=800, height=400,
+        attrs={
+            "data-pbi": "clusteredColumnChart",
+            "data-pbi-axis": "sales[OrderDate]",
+            "data-pbi-values": "Total Revenue",
+            "data-pbi-series": "sales[Region]",
+        },
+    )
+    result = build_visual_json(node, z_order=0, schema=schema)
+    assert result["visual"]["visualType"] == "clusteredColumnChart"
+    qs = result["visual"]["query"]["queryState"]
+    assert "Category" in qs
+    assert qs["Category"]["projections"][0]["field"]["Column"]["Property"] == "OrderDate"
+    assert "Y" in qs
+    assert qs["Y"]["projections"][0]["field"]["Measure"]["Property"] == "Total Revenue"
+    assert "Series" in qs
+    assert qs["Series"]["projections"][0]["field"]["Column"]["Property"] == "Region"
+
+
+def test_column_chart_with_series(schema: ModelSchema) -> None:
+    node = VisualNode(
+        x=0, y=0, width=800, height=400,
+        attrs={
+            "data-pbi": "columnChart",
+            "data-pbi-axis": "sales[OrderDate]",
+            "data-pbi-values": "Total Revenue",
+            "data-pbi-series": "sales[Region]",
+        },
+    )
+    result = build_visual_json(node, z_order=0, schema=schema)
+    assert result["visual"]["visualType"] == "columnChart"
+    qs = result["visual"]["query"]["queryState"]
+    assert "Series" in qs
+    assert qs["Series"]["projections"][0]["field"]["Column"]["Property"] == "Region"
+
+
+def test_clustered_bar_chart(schema: ModelSchema) -> None:
+    node = VisualNode(
+        x=0, y=0, width=800, height=400,
+        attrs={
+            "data-pbi": "clusteredBarChart",
+            "data-pbi-axis": "sales[OrderDate]",
+            "data-pbi-values": "Total Revenue",
+            "data-pbi-series": "sales[Region]",
+        },
+    )
+    result = build_visual_json(node, z_order=0, schema=schema)
+    assert result["visual"]["visualType"] == "clusteredBarChart"
+    qs = result["visual"]["query"]["queryState"]
+    assert "Category" in qs
+    assert qs["Category"]["projections"][0]["field"]["Column"]["Property"] == "OrderDate"
+    assert "Y" in qs
+    assert qs["Y"]["projections"][0]["field"]["Measure"]["Property"] == "Total Revenue"
+    assert "Series" in qs
+    assert qs["Series"]["projections"][0]["field"]["Column"]["Property"] == "Region"
+
+
+def test_bar_chart_with_series(schema: ModelSchema) -> None:
+    node = VisualNode(
+        x=0, y=0, width=800, height=400,
+        attrs={
+            "data-pbi": "barChart",
+            "data-pbi-axis": "sales[OrderDate]",
+            "data-pbi-values": "Total Revenue",
+            "data-pbi-series": "sales[Region]",
+        },
+    )
+    result = build_visual_json(node, z_order=0, schema=schema)
+    assert result["visual"]["visualType"] == "barChart"
+    qs = result["visual"]["query"]["queryState"]
+    assert "Series" in qs
+    assert qs["Series"]["projections"][0]["field"]["Column"]["Property"] == "Region"
+
+
+def test_hundred_percent_stacked_bar_chart(schema: ModelSchema) -> None:
+    node = VisualNode(
+        x=0, y=0, width=800, height=400,
+        attrs={
+            "data-pbi": "hundredPercentStackedBarChart",
+            "data-pbi-axis": "sales[OrderDate]",
+            "data-pbi-values": "Total Revenue",
+            "data-pbi-series": "sales[Region]",
+        },
+    )
+    result = build_visual_json(node, z_order=0, schema=schema)
+    assert result["visual"]["visualType"] == "hundredPercentStackedBarChart"
+    qs = result["visual"]["query"]["queryState"]
+    assert "Category" in qs
+    assert "Y" in qs
+    assert "Series" in qs
+
+
+def test_hundred_percent_stacked_column_chart(schema: ModelSchema) -> None:
+    node = VisualNode(
+        x=0, y=0, width=800, height=400,
+        attrs={
+            "data-pbi": "hundredPercentStackedColumnChart",
+            "data-pbi-axis": "sales[OrderDate]",
+            "data-pbi-values": "Total Revenue",
+            "data-pbi-series": "sales[Region]",
+        },
+    )
+    result = build_visual_json(node, z_order=0, schema=schema)
+    assert result["visual"]["visualType"] == "hundredPercentStackedColumnChart"
+    qs = result["visual"]["query"]["queryState"]
+    assert "Category" in qs
+    assert "Y" in qs
+    assert "Series" in qs
+
+
+def test_area_chart_without_series(schema: ModelSchema) -> None:
+    node = VisualNode(
+        x=0, y=0, width=800, height=400,
+        attrs={
+            "data-pbi": "areaChart",
+            "data-pbi-axis": "sales[OrderDate]",
+            "data-pbi-values": "Total Revenue",
+        },
+    )
+    result = build_visual_json(node, z_order=0, schema=schema)
+    assert result["visual"]["visualType"] == "areaChart"
+    qs = result["visual"]["query"]["queryState"]
+    assert "Category" in qs
+    assert "Y" in qs
+    assert "Series" not in qs
+
+
+def test_area_chart_with_series(schema: ModelSchema) -> None:
+    node = VisualNode(
+        x=0, y=0, width=800, height=400,
+        attrs={
+            "data-pbi": "areaChart",
+            "data-pbi-axis": "sales[OrderDate]",
+            "data-pbi-values": "Total Revenue",
+            "data-pbi-series": "sales[Region]",
+        },
+    )
+    result = build_visual_json(node, z_order=0, schema=schema)
+    assert result["visual"]["visualType"] == "areaChart"
+    qs = result["visual"]["query"]["queryState"]
+    assert "Category" in qs
+    assert "Y" in qs
+    assert "Series" in qs
+
+
+def test_pie_chart(schema: ModelSchema) -> None:
+    node = VisualNode(
+        x=0, y=0, width=400, height=400,
+        attrs={
+            "data-pbi": "pieChart",
+            "data-pbi-axis": "sales[Region]",
+            "data-pbi-values": "Total Revenue",
+        },
+    )
+    result = build_visual_json(node, z_order=0, schema=schema)
+    assert result["visual"]["visualType"] == "pieChart"
+    qs = result["visual"]["query"]["queryState"]
+    assert "Category" in qs
+    assert qs["Category"]["projections"][0]["field"]["Column"]["Property"] == "Region"
+    assert "Y" in qs
+    assert qs["Y"]["projections"][0]["field"]["Measure"]["Property"] == "Total Revenue"
+
+
+def test_donut_chart(schema: ModelSchema) -> None:
+    node = VisualNode(
+        x=0, y=0, width=400, height=400,
+        attrs={
+            "data-pbi": "donutChart",
+            "data-pbi-axis": "sales[Region]",
+            "data-pbi-values": "Total Revenue",
+        },
+    )
+    result = build_visual_json(node, z_order=0, schema=schema)
+    assert result["visual"]["visualType"] == "donutChart"
+    qs = result["visual"]["query"]["queryState"]
+    assert "Category" in qs
+    assert qs["Category"]["projections"][0]["field"]["Column"]["Property"] == "Region"
+    assert "Y" in qs
+    assert qs["Y"]["projections"][0]["field"]["Measure"]["Property"] == "Total Revenue"

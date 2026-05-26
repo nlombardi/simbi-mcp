@@ -29,6 +29,13 @@ _PBI_VISUAL_TYPE: dict[VisualType, str] = {
     VisualType.LINE_CHART: "lineChart",
     VisualType.SLICER: "advancedSlicerVisual",
     VisualType.TABLE: "tableEx",
+    VisualType.CLUSTERED_COLUMN_CHART: "clusteredColumnChart",
+    VisualType.CLUSTERED_BAR_CHART: "clusteredBarChart",
+    VisualType.HUNDRED_PERCENT_STACKED_BAR_CHART: "hundredPercentStackedBarChart",
+    VisualType.HUNDRED_PERCENT_STACKED_COLUMN_CHART: "hundredPercentStackedColumnChart",
+    VisualType.AREA_CHART: "areaChart",
+    VisualType.PIE_CHART: "pieChart",
+    VisualType.DONUT_CHART: "donutChart",
 }
 
 
@@ -85,12 +92,33 @@ def _build_query_state(
         return {"Values": {"projections": [_measure_proj(attrs["data-pbi-measure"], schema)]}}
 
     if vtype in (VisualType.COLUMN_CHART, VisualType.BAR_CHART):
+        qs = {
+            "Category": {"projections": [_column_proj(attrs["data-pbi-axis"], active=True)]},
+            "Y": {"projections": [_measure_proj(attrs["data-pbi-values"], schema)]},
+        }
+        if "data-pbi-series" in attrs:
+            qs["Series"] = {"projections": [_column_proj(attrs["data-pbi-series"])]}
+        return qs
+
+    if vtype in (VisualType.PIE_CHART, VisualType.DONUT_CHART):
         return {
             "Category": {"projections": [_column_proj(attrs["data-pbi-axis"], active=True)]},
             "Y": {"projections": [_measure_proj(attrs["data-pbi-values"], schema)]},
         }
 
-    if vtype is VisualType.LINE_CHART:
+    if vtype in (
+        VisualType.CLUSTERED_COLUMN_CHART,
+        VisualType.CLUSTERED_BAR_CHART,
+        VisualType.HUNDRED_PERCENT_STACKED_BAR_CHART,
+        VisualType.HUNDRED_PERCENT_STACKED_COLUMN_CHART,
+    ):
+        return {
+            "Category": {"projections": [_column_proj(attrs["data-pbi-axis"], active=True)]},
+            "Y": {"projections": [_measure_proj(attrs["data-pbi-values"], schema)]},
+            "Series": {"projections": [_column_proj(attrs["data-pbi-series"])]},
+        }
+
+    if vtype in (VisualType.LINE_CHART, VisualType.AREA_CHART):
         qs: dict[str, Any] = {
             "Category": {"projections": [_column_proj(attrs["data-pbi-axis"], active=True)]},
             "Y": {"projections": [_measure_proj(attrs["data-pbi-values"], schema)]},
