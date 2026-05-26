@@ -12,6 +12,7 @@ from pathlib import Path
 
 from simbi_mcp.pbir.extractor import extract_visuals
 from simbi_mcp.pbir.templates import build_visual_json
+from simbi_mcp.pbir.theme import resolve_theme
 from simbi_mcp.pbir.writer import write_report
 from simbi_mcp.types import ModelSchema
 
@@ -25,11 +26,18 @@ async def emit_pbir(
     report_name: str,
     output_dir: Path,
     semantic_model_rel_path: str | None = None,
+    theme_path: Path | None = None,
 ) -> Path:
     """Render html in system Chrome, extract annotations, write the .Report folder.
 
     The .pbip and .SemanticModel are produced by Power BI Desktop / Power BI MCP
     and are NEVER touched by SimBI — SimBI only contributes the .Report folder.
+
+    `theme_path` is an optional path to a partial PBIR theme JSON. When omitted,
+    SimBI emits its opinionated default theme (Microsoft CY25SU10 colour science
+    + SimBI's visualStyles for gridline-off, lean cards, consistent typography).
+    A user theme deep-merges onto that default, so corp branding (typically just
+    `dataColors`) does not erase SimBI's visualStyles opinions.
 
     Creates:
       output_dir/<report_name>.Report/        (PBIR report folder)
@@ -49,9 +57,12 @@ async def emit_pbir(
         for i, node in enumerate(nodes)
     ]
 
+    theme = resolve_theme(user_theme_path=theme_path)
+
     return write_report(
         visuals=visuals,
         report_name=report_name,
         output_dir=output_dir,
         semantic_model_rel_path=semantic_model_rel_path,
+        theme=theme,
     )

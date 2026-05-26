@@ -118,6 +118,72 @@ mcp: FastMCP = FastMCP(
         "Reach for Power BI MCP only when you have already confirmed a live\n"
         "connection exists. The presence of the tool in the catalog is NOT proof\n"
         "of a connection.\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "DESIGN PRINCIPLES — apply when generating the HTML mockup\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "Distilled from docs/dashboard-design-playbook.md. These are not\n"
+        "suggestions — they shape what gets emitted into Power BI.\n\n"
+        "  LAYOUT\n"
+        "    - Canvas is fixed 1280 × 720 (db-page). Never assume scroll.\n"
+        "    - Backbone: KPI strip (top, db-row-1) → primary chart (largest\n"
+        "      cell, typically db-col-2/3 + db-row-2) → supporting detail. If\n"
+        "      you can't identify the primary chart, the dashboard has no\n"
+        "      purpose yet — ask the user.\n"
+        "    - F-pattern reading: most-important KPI top-left. Z-pattern only\n"
+        "      for executive landing pages.\n"
+        "    - Whitespace is signal, not waste. Don't fill cells just because\n"
+        "      they are empty.\n\n"
+        "  SLICER PLACEMENT\n"
+        "    - Slicers go in ONE of two locations: a top rail (full canvas\n"
+        "      width) OR a dedicated left column (single db-col-1). Never\n"
+        "      scatter them. A scattered slicer is a broken slicer — readers\n"
+        "      who cannot find the controls assume there are none.\n"
+        "    - Default state: 'Select all'. Do NOT pre-filter unless the\n"
+        "      dashboard title explicitly states the scope.\n\n"
+        "  CHART CHOICE\n"
+        "    - 'Comparison across categories' → bar/column chart.\n"
+        "    - 'Trend over time' → line chart (or area for cumulative).\n"
+        "    - 'Part-to-whole' with ≤5 parts → pie/donut; ≥6 parts → sorted\n"
+        "      bar (humans cannot compare arc lengths past a handful).\n"
+        "    - 'Two measures, is there a relationship' → scatter/bubble.\n"
+        "    - 'Single headline number' → card; with target → KPI.\n"
+        "    - 'Process drop-off through stages' → funnel.\n"
+        "    - When unsure, see docs/chart-catalog.md decision tree.\n\n"
+        "  COLOUR\n"
+        "    - SimBI ships a theme: Microsoft CY25SU10 palette + opinionated\n"
+        "      visualStyles (gridlines off, no visual borders, lean cards).\n"
+        "      You generally do NOT need to specify colours.\n"
+        "    - Semantic colour is RESERVED: green = good, red = bad,\n"
+        "      grey = neutral/inactive. Never reassign these to categorical\n"
+        "      data (a red bar for APAC makes APAC look like an alert).\n"
+        "    - Ordinal data (Low/Medium/High, 1-5 ratings) MUST use a\n"
+        "      sequential palette — never categorical/rainbow.\n"
+        "    - Never encode information by colour alone. ~8% of men have\n"
+        "      colour-vision deficiency. Reinforce with label, shape, or\n"
+        "      position (e.g. direct-label lines instead of relying on legend).\n\n"
+        "  TYPOGRAPHY & NUMBERS\n"
+        "    - One typeface, three sizes max. db-label (small muted) for the\n"
+        "      dimension name; db-value (large bold) for the KPI number;\n"
+        "      add a title size only for section headers.\n"
+        "    - Right-align numerics. Hold precision constant within a column.\n"
+        "    - Abbreviate at scale (1.2M not 1,234,567) but only consistently\n"
+        "      across the whole column. Thousand-separators are mandatory.\n\n"
+        "  ANTI-PATTERNS — refuse these even if the user asks for them, and\n"
+        "  explain why\n"
+        "    - 3D bars/pies/anything. Foreground reads taller; back slice\n"
+        "      reads smaller. The chart encodes a lie before the numbers are\n"
+        "      read. Use flat 2D.\n"
+        "    - Pie or donut with more than 5 slices. Arc-length comparison\n"
+        "      breaks down. Use a sorted bar chart.\n"
+        "    - Dual-axis charts where the two axes don't share a meaningful\n"
+        "      zero or unit. Implies correlation that may not exist. Use\n"
+        "      small multiples (two line charts side-by-side) instead.\n"
+        "    - Rainbow palettes on ordinal data. Hides the order. Use a\n"
+        "      sequential palette.\n"
+        "    - Decoration (gradients on bars, drop shadows on bars,\n"
+        "      backgrounds, per-visual branding). Every non-data pixel\n"
+        "      spends the reader's finite attention. Brand belongs in the\n"
+        "      theme and page header, not on every visual.\n\n"
         + ANNOTATION_SPEC_TEXT
         + "\n"
         + CSS_CLASS_CATALOG
@@ -262,6 +328,7 @@ async def emit_report(
     html: str,
     schema_json: str,
     pbip_path: str,
+    theme_path: str | None = None,
 ) -> str:
     """Render annotated HTML and write the .Report folder beside an existing .pbip.
 
@@ -276,6 +343,14 @@ async def emit_report(
             error and must pass the file path explicitly). The .pbip and its
             sibling .SemanticModel — created earlier by Power BI Desktop or
             the Power BI MCP — are left untouched.
+      theme_path: OPTIONAL absolute path to a partial PBIR theme JSON file
+            (corp branding, custom palette, textClasses overrides, etc.).
+            When omitted, SimBI emits its opinionated default theme:
+            Microsoft CY25SU10 colour science + SimBI visualStyles enforcing
+            the design playbook (hidden gridlines, lean cards, no visual
+            borders, consistent Segoe UI typography). User themes deep-merge
+            ONTO that default — pass only `dataColors` to rebrand without
+            losing SimBI's visualStyles opinions.
 
     Returns: absolute path to the .Report folder that was written.
 
@@ -356,6 +431,7 @@ async def emit_report(
         schema=schema,
         report_name=pbip.stem,
         output_dir=pbip.parent,
+        theme_path=Path(theme_path) if theme_path else None,
     )
     # Path 1 only: if the SemanticModel exists but is missing measures (i.e. a
     # blank .pbip created by Power BI Desktop with no data connected), write the
