@@ -24,6 +24,9 @@ _VISUAL_SCHEMA = (
 # "table" in our vocabulary maps to "tableEx" — Power BI's internal type name.
 _PBI_VISUAL_TYPE: dict[VisualType, str] = {
     VisualType.CARD: "card",
+    VisualType.MULTI_ROW_CARD: "multiRowCard",
+    VisualType.KPI: "kpi",
+    VisualType.GAUGE: "gauge",
     VisualType.COLUMN_CHART: "columnChart",
     VisualType.BAR_CHART: "barChart",
     VisualType.LINE_CHART: "lineChart",
@@ -36,6 +39,24 @@ _PBI_VISUAL_TYPE: dict[VisualType, str] = {
     VisualType.AREA_CHART: "areaChart",
     VisualType.PIE_CHART: "pieChart",
     VisualType.DONUT_CHART: "donutChart",
+    # Catalog flags PBIR visualType for dotPlot as "not confirmed in samples".
+    # Using `dotPlot` as the most plausible string; verify against a PBIR sample
+    # if the visual fails to render after emit.
+    VisualType.DOT_PLOT: "dotPlot",
+    VisualType.COMBO_CHART: "lineClusteredColumnComboChart",
+    VisualType.TREEMAP: "treemap",
+    # Annotation token is "funnelChart"; PBIR visualType is "funnel" (catalog-confirmed).
+    VisualType.FUNNEL_CHART: "funnel",
+    # Histogram = barChart with axis bin config (no distinct PBIR type).
+    VisualType.HISTOGRAM: "barChart",
+    VisualType.SCATTER_CHART: "scatterChart",
+    # Bubble = scatterChart + Size data role binding (catalog-confirmed: same PBIR type).
+    VisualType.BUBBLE_CHART: "scatterChart",
+    VisualType.WATERFALL_CHART: "waterfallChart",
+    VisualType.RIBBON_CHART: "ribbonChart",
+    VisualType.MAP: "map",
+    VisualType.FILLED_MAP: "filledMap",
+    VisualType.SHAPE_MAP: "shapeMap",
 }
 
 
@@ -76,6 +97,29 @@ def build_visual_json(
                 }
             ]
         }
+    if vtype is VisualType.HISTOGRAM and "data-pbi-bins" in node.attrs:
+        # Bin count is an axis-level property on the underlying barChart.
+        # Catalog flags the exact PBIR property name as TBD — using `binCount`
+        # as the most likely Power BI property; adjust if a PBIR sample disagrees.
+        try:
+            bin_count = int(node.attrs["data-pbi-bins"])
+        except ValueError as e:
+            raise ValueError(
+                f"data-pbi-bins must be an integer, got {node.attrs['data-pbi-bins']!r}"
+            ) from e
+        visual.setdefault("objects", {})["categoryAxis"] = [
+            {"properties": {"binCount": {"expr": {"Literal": {"Value": f"{bin_count}L"}}}}}
+        ]
+    if vtype is VisualType.SHAPE_MAP and "data-pbi-topojson" in node.attrs:
+        # Shape Map TopoJSON source — PBIR property name not fully documented in
+        # public samples; emitting a placeholder `mapShape` objects entry. Users
+        # configuring custom shapes will likely need to set this via Power BI
+        # Desktop after open; the path is preserved here for downstream tooling.
+        visual.setdefault("objects", {})["mapShape"] = [
+            {"properties": {"shapeFile": {"expr": {"Literal": {
+                "Value": f"'{node.attrs['data-pbi-topojson']}'"
+            }}}}}
+        ]
     return container
 
 
@@ -139,6 +183,108 @@ def _build_query_state(
             else:
                 projections.append(_measure_proj(token, schema))
         return {"Values": {"projections": projections}}
+
+    if vtype is VisualType.MULTI_ROW_CARD:
+        names = [n.strip() for n in attrs["data-pbi-measures"].split(",") if n.strip()]
+        return {"Values": {"projections": [_measure_proj(n, schema) for n in names]}}
+
+    if vtype is VisualType.KPI:
+        return {
+            "Indicator": {"projections": [_measure_proj(attrs["data-pbi-measure"], schema)]},
+            "TrendLine": {"projections": [_column_proj(attrs["data-pbi-trend"], active=True)]},
+            "Goals": {"projections": [_measure_proj(attrs["data-pbi-target"], schema)]},
+        }
+
+    if vtype is VisualType.GAUGE:
+        qs: dict[str, Any] = {
+            "Y": {"projections": [_measure_proj(attrs["data-pbi-measure"], schema)]},
+        }
+        if "data-pbi-min" in attrs:
+            qs["MinValue"] = {"projections": [_measure_proj(attrs["data-pbi-min"], schema)]}
+        if "data-pbi-max" in attrs:
+            qs["MaxValue"] = {"projections": [_measure_proj(attrs["data-pbi-max"], schema)]}
+        if "data-pbi-target" in attrs:
+            qs["TargetValue"] = {"projections": [_measure_proj(attrs["data-pbi-target"], schema)]}
+        return qs
+
+    if vtype is VisualType.DOT_PLOT:
+        return {
+            "Category": {"projections": [_column_proj(attrs["data-pbi-axis"], active=True)]},
+            "X": {"projections": [_measure_proj(attrs["data-pbi-values"], schema)]},
+        }
+
+    if vtype is VisualType.COMBO_CHART:
+        return {
+            "Category": {"projections": [_column_proj(attrs["data-pbi-axis"], active=True)]},
+            "Y": {"projections": [_measure_proj(attrs["data-pbi-column-values"], schema)]},
+            "Y2": {"projections": [_measure_proj(attrs["data-pbi-line-values"], schema)]},
+        }
+
+    if vtype is VisualType.TREEMAP:
+        qs = {
+            "Group": {"projections": [_column_proj(attrs["data-pbi-group"], active=True)]},
+            "Values": {"projections": [_measure_proj(attrs["data-pbi-values"], schema)]},
+        }
+        if "data-pbi-details" in attrs:
+            qs["Details"] = {"projections": [_column_proj(attrs["data-pbi-details"])]}
+        return qs
+
+    if vtype is VisualType.FUNNEL_CHART:
+        return {
+            "Category": {"projections": [_column_proj(attrs["data-pbi-axis"], active=True)]},
+            "Y": {"projections": [_measure_proj(attrs["data-pbi-values"], schema)]},
+        }
+
+    if vtype is VisualType.HISTOGRAM:
+        # Emits as a barChart with the measure on Y. Bin count is applied at the
+        # visual `objects` level by build_visual_json (not in queryState).
+        return {
+            "Y": {"projections": [_measure_proj(attrs["data-pbi-values"], schema)]},
+        }
+
+    if vtype in (VisualType.SCATTER_CHART, VisualType.BUBBLE_CHART):
+        qs = {
+            "X": {"projections": [_measure_proj(attrs["data-pbi-x"], schema)]},
+            "Y": {"projections": [_measure_proj(attrs["data-pbi-y"], schema)]},
+        }
+        if vtype is VisualType.BUBBLE_CHART:
+            qs["Size"] = {"projections": [_measure_proj(attrs["data-pbi-size"], schema)]}
+        if "data-pbi-details" in attrs:
+            qs["Details"] = {"projections": [_column_proj(attrs["data-pbi-details"])]}
+        return qs
+
+    if vtype is VisualType.WATERFALL_CHART:
+        qs = {
+            "Category": {"projections": [_column_proj(attrs["data-pbi-axis"], active=True)]},
+            "Y": {"projections": [_measure_proj(attrs["data-pbi-values"], schema)]},
+        }
+        if "data-pbi-breakdown" in attrs:
+            qs["Breakdown"] = {"projections": [_column_proj(attrs["data-pbi-breakdown"])]}
+        return qs
+
+    if vtype is VisualType.RIBBON_CHART:
+        return {
+            "Category": {"projections": [_column_proj(attrs["data-pbi-axis"], active=True)]},
+            "Y": {"projections": [_measure_proj(attrs["data-pbi-values"], schema)]},
+            "Series": {"projections": [_column_proj(attrs["data-pbi-series"])]},
+        }
+
+    if vtype is VisualType.MAP:
+        qs = {
+            "Location": {"projections": [_column_proj(attrs["data-pbi-location"], active=True)]},
+            "Size": {"projections": [_measure_proj(attrs["data-pbi-size"], schema)]},
+        }
+        if "data-pbi-legend" in attrs:
+            qs["Legend"] = {"projections": [_column_proj(attrs["data-pbi-legend"])]}
+        return qs
+
+    if vtype in (VisualType.FILLED_MAP, VisualType.SHAPE_MAP):
+        return {
+            "Location": {"projections": [_column_proj(attrs["data-pbi-location"], active=True)]},
+            "Color saturation": {
+                "projections": [_measure_proj(attrs["data-pbi-color-saturation"], schema)]
+            },
+        }
 
     raise ValueError(f"Unsupported visual type: {vtype!r}")
 
