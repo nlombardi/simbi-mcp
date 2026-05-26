@@ -35,6 +35,34 @@ _EXAMPLES: dict[VisualType, str] = {
         '<div data-pbi="table" '
         'data-pbi-columns="sales[Region],Total Revenue,Order Count"></div>'
     ),
+    VisualType.CLUSTERED_COLUMN_CHART: (
+        '<div data-pbi="clusteredColumnChart" data-pbi-axis="sales[Region]" '
+        'data-pbi-values="Total Revenue" data-pbi-series="sales[OrderDate]"></div>'
+    ),
+    VisualType.CLUSTERED_BAR_CHART: (
+        '<div data-pbi="clusteredBarChart" data-pbi-axis="sales[Region]" '
+        'data-pbi-values="Total Revenue" data-pbi-series="sales[OrderDate]"></div>'
+    ),
+    VisualType.HUNDRED_PERCENT_STACKED_BAR_CHART: (
+        '<div data-pbi="hundredPercentStackedBarChart" data-pbi-axis="sales[Region]" '
+        'data-pbi-values="Total Revenue" data-pbi-series="sales[OrderDate]"></div>'
+    ),
+    VisualType.HUNDRED_PERCENT_STACKED_COLUMN_CHART: (
+        '<div data-pbi="hundredPercentStackedColumnChart" data-pbi-axis="sales[Region]" '
+        'data-pbi-values="Total Revenue" data-pbi-series="sales[OrderDate]"></div>'
+    ),
+    VisualType.AREA_CHART: (
+        '<div data-pbi="areaChart" data-pbi-axis="sales[OrderDate]" '
+        'data-pbi-values="Total Revenue"></div>'
+    ),
+    VisualType.PIE_CHART: (
+        '<div data-pbi="pieChart" data-pbi-axis="sales[Region]" '
+        'data-pbi-values="Total Revenue"></div>'
+    ),
+    VisualType.DONUT_CHART: (
+        '<div data-pbi="donutChart" data-pbi-axis="sales[Region]" '
+        'data-pbi-values="Total Revenue"></div>'
+    ),
 }
 
 

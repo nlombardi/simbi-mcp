@@ -21,6 +21,13 @@ class VisualType(StrEnum):
     LINE_CHART = "lineChart"
     SLICER = "slicer"
     TABLE = "table"
+    CLUSTERED_COLUMN_CHART = "clusteredColumnChart"
+    CLUSTERED_BAR_CHART = "clusteredBarChart"
+    HUNDRED_PERCENT_STACKED_BAR_CHART = "hundredPercentStackedBarChart"
+    HUNDRED_PERCENT_STACKED_COLUMN_CHART = "hundredPercentStackedColumnChart"
+    AREA_CHART = "areaChart"
+    PIE_CHART = "pieChart"
+    DONUT_CHART = "donutChart"
 
 
 # Required and optional data-pbi-* attributes per visual type.
@@ -32,11 +39,11 @@ VISUAL_ATTRS: dict[VisualType, VisualAttrSpec] = {
     },
     VisualType.COLUMN_CHART: {
         "required": ["data-pbi-axis", "data-pbi-values"],
-        "optional": [],
+        "optional": ["data-pbi-series"],
     },
     VisualType.BAR_CHART: {
         "required": ["data-pbi-axis", "data-pbi-values"],
-        "optional": [],
+        "optional": ["data-pbi-series"],
     },
     VisualType.LINE_CHART: {
         "required": ["data-pbi-axis", "data-pbi-values"],
@@ -48,6 +55,34 @@ VISUAL_ATTRS: dict[VisualType, VisualAttrSpec] = {
     },
     VisualType.TABLE: {
         "required": ["data-pbi-columns"],
+        "optional": [],
+    },
+    VisualType.CLUSTERED_COLUMN_CHART: {
+        "required": ["data-pbi-axis", "data-pbi-values", "data-pbi-series"],
+        "optional": [],
+    },
+    VisualType.CLUSTERED_BAR_CHART: {
+        "required": ["data-pbi-axis", "data-pbi-values", "data-pbi-series"],
+        "optional": [],
+    },
+    VisualType.HUNDRED_PERCENT_STACKED_BAR_CHART: {
+        "required": ["data-pbi-axis", "data-pbi-values", "data-pbi-series"],
+        "optional": [],
+    },
+    VisualType.HUNDRED_PERCENT_STACKED_COLUMN_CHART: {
+        "required": ["data-pbi-axis", "data-pbi-values", "data-pbi-series"],
+        "optional": [],
+    },
+    VisualType.AREA_CHART: {
+        "required": ["data-pbi-axis", "data-pbi-values"],
+        "optional": ["data-pbi-series"],
+    },
+    VisualType.PIE_CHART: {
+        "required": ["data-pbi-axis", "data-pbi-values"],
+        "optional": [],
+    },
+    VisualType.DONUT_CHART: {
+        "required": ["data-pbi-axis", "data-pbi-values"],
         "optional": [],
     },
 }
@@ -65,15 +100,50 @@ required data-pbi-* attributes shown below.
   columnChart      (vertical bars — category on X axis)
     data-pbi-axis="<Table>[<Column>]"      ← dimension column for X axis
     data-pbi-values="<Measure Name>"       ← measure for Y axis
+    data-pbi-series="<Table>[<Column>]"    ← (optional) series/legend split (renders as stacked column)
+
+  clusteredColumnChart (clustered vertical bars — category on X, series split)
+    data-pbi-axis="<Table>[<Column>]"      ← dimension column for X axis
+    data-pbi-values="<Measure Name>"       ← measure for Y axis
+    data-pbi-series="<Table>[<Column>]"    ← series/legend split for clusters
+
+  hundredPercentStackedColumnChart (100% stacked vertical bars — category on X)
+    data-pbi-axis="<Table>[<Column>]"      ← dimension column for X axis
+    data-pbi-values="<Measure Name>"       ← measure for Y axis
+    data-pbi-series="<Table>[<Column>]"    ← series/legend split for stacking
 
   barChart         (horizontal bars — category on Y axis)
     data-pbi-axis="<Table>[<Column>]"      ← dimension column for Y axis
     data-pbi-values="<Measure Name>"       ← measure for X axis
+    data-pbi-series="<Table>[<Column>]"    ← (optional) series/legend split (renders as stacked bar)
+
+  clusteredBarChart (clustered horizontal bars — category on Y, series split)
+    data-pbi-axis="<Table>[<Column>]"      ← dimension column for Y axis
+    data-pbi-values="<Measure Name>"       ← measure for X axis
+    data-pbi-series="<Table>[<Column>]"    ← series/legend split for clusters
+
+  hundredPercentStackedBarChart (100% stacked horizontal bars — category on Y)
+    data-pbi-axis="<Table>[<Column>]"      ← dimension column for Y axis
+    data-pbi-values="<Measure Name>"       ← measure for X axis
+    data-pbi-series="<Table>[<Column>]"    ← series/legend split for stacking
 
   lineChart
     data-pbi-axis="<Table>[<Column>]"      ← dimension for X axis
     data-pbi-values="<Measure Name>"       ← measure for Y axis
     data-pbi-series="<Table>[<Column>]"    ← (optional) series/legend split
+
+  areaChart
+    data-pbi-axis="<Table>[<Column>]"      ← dimension for X axis
+    data-pbi-values="<Measure Name>"       ← measure for Y axis
+    data-pbi-series="<Table>[<Column>]"    ← (optional) series/legend split
+
+  pieChart
+    data-pbi-axis="<Table>[<Column>]"      ← category dimension for slices
+    data-pbi-values="<Measure Name>"       ← measure for slice size
+
+  donutChart
+    data-pbi-axis="<Table>[<Column>]"      ← category dimension for slices
+    data-pbi-values="<Measure Name>"       ← measure for slice size
 
   slicer
     data-pbi-field="<Table>[<Column>]"     ← field to filter on
