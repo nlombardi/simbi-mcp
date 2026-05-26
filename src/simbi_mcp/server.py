@@ -13,6 +13,7 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
+from simbi_mcp.dax.linter import lint_measures as _lint_measures
 from simbi_mcp.mockup.annotations import ANNOTATION_SPEC_TEXT, CSS_CLASS_CATALOG
 from simbi_mcp.mockup.validator import (
     ValidationError,
@@ -37,22 +38,45 @@ mcp: FastMCP = FastMCP(
         "  1. The user must first create a blank .pbip in Power BI Desktop\n"
         "     (File → New → File → Save As → Power BI Project format) and\n"
         "     then CLOSE Power BI Desktop.\n"
-        "  2. Write TMDL yourself from the user's CSV description. Include:\n"
+        "  2. INSPECT THE SOURCE BEFORE WRITING ANY DAX. Open the CSV/Excel\n"
+        "     and confirm:\n"
+        "       - Exact column names and dtypes (case-sensitive). Do not guess.\n"
+        "       - SHAPE: long (one row per fact, single value column with a\n"
+        "         key column like Year/Period) vs WIDE (one column per period,\n"
+        "         e.g. [2024], [2025], [2026]). Most economic / financial\n"
+        "         exports are WIDE.\n"
+        "       - If WIDE: your TMDL MUST include an unpivoted table (Power\n"
+        "         Query M `Table.UnpivotOtherColumns`) producing Year + Value\n"
+        "         columns. Then aggregate Value with a FILTER on Year. Do NOT\n"
+        "         write SUM(t[2026]) — aggregating a single period column is\n"
+        "         almost always wrong.\n"
+        "       - If filtering by a category encoded as a row value (e.g.\n"
+        "         INDICATOR='Consumer prices'), prefer a stable ID column\n"
+        "         (INDICATOR.ID, SERIES_CODE) over substring matches on the\n"
+        "         display name. SEARCH() raises on no-match; if you must use\n"
+        "         it, pass a 4th arg (BLANK()) or use CONTAINSSTRING().\n"
+        "  3. Write TMDL yourself from the inspected source. Include:\n"
         "       - A table block with the correct column names and dataTypes\n"
         "         (string, int64, double, dateTime)\n"
+        "       - For wide sources: a second table block with an unpivot\n"
+        "         partition (M: Table.UnpivotOtherColumns) producing long form\n"
         "       - Measure definitions with DAX expressions and formatStrings\n"
         "         (e.g. measure 'Total Revenue' = SUM(sales[Revenue]))\n"
-        "       - A partition block pointing at the CSV file path\n"
+        "       - A partition block pointing at the CSV/Excel file path\n"
         "     Do NOT call the Power BI MCP. Write the TMDL as inline text.\n"
-        "  3. Call SimBI.parse_schema with the TMDL text you wrote in step 2.\n"
-        "  4. Generate annotated HTML using the schema (see VOCABULARY below).\n"
+        "  4. Call SimBI.lint_measures with the TMDL. Fix every ERROR; review\n"
+        "     each WARNING and either fix it or confirm it is a deliberate\n"
+        "     choice. A clean lint does NOT prove the DAX is correct — it\n"
+        "     proves the known footguns are absent.\n"
+        "  5. Call SimBI.parse_schema with the TMDL text you wrote in step 3.\n"
+        "  6. Generate annotated HTML using the schema (see VOCABULARY below).\n"
         "     Every visual element MUST have non-zero CSS dimensions — use the\n"
         "     dashboard.css classes (db-page, db-grid, db-card, db-chart-area).\n"
-        "  5. Call SimBI.validate_mockup_html to lint the HTML.\n"
-        "  6. Call SimBI.emit_report with pbip_path pointing to the .pbip.\n"
-        "     emit_report automatically writes the measures from step 2 into the\n"
+        "  7. Call SimBI.validate_mockup_html to lint the HTML.\n"
+        "  8. Call SimBI.emit_report with pbip_path pointing to the .pbip.\n"
+        "     emit_report automatically writes the measures from step 3 into the\n"
         "     SemanticModel so they appear in Power BI Desktop on open.\n"
-        "  7. Open the .pbip fresh in Power BI Desktop. Visuals render immediately\n"
+        "  9. Open the .pbip fresh in Power BI Desktop. Visuals render immediately\n"
         "     but show empty data — use Home → Transform data to connect the CSV.\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         "PATH 2 — Microsoft Power BI MCP + SimBI\n"
@@ -76,6 +100,24 @@ mcp: FastMCP = FastMCP(
         "  8. Call SimBI.emit_report with pbip_path pointing to the .pbip.\n"
         "  9. Open the .pbip fresh in Power BI Desktop. All visuals appear with\n"
         "     live data immediately — no refresh needed.\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "FALLBACK — Power BI MCP listed but not connected\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "If the Power BI MCP tools are visible but any call returns an error like\n"
+        "'No connectionName provided', 'connect to a server first', 'no last used\n"
+        "connection available', or any other not-connected error: do NOT retry the\n"
+        "Power BI MCP call, and do NOT ask the user to open Power BI Desktop just\n"
+        "to create measures. Switch to PATH 1 immediately.\n\n"
+        "SimBI does NOT need a live Power BI connection to create measures,\n"
+        "tables, or relationships. Everything is file-based:\n"
+        "  - Write the full TMDL (tables + measure blocks + partitions) as inline\n"
+        "    text and pass it to SimBI.parse_schema.\n"
+        "  - SimBI.emit_report then writes those measures into the .SemanticModel\n"
+        "    on disk via patch_semantic_model_measures — no XMLA, no live session.\n"
+        "  - The user opens the .pbip fresh and the measures are already there.\n\n"
+        "Reach for Power BI MCP only when you have already confirmed a live\n"
+        "connection exists. The presence of the tool in the catalog is NOT proof\n"
+        "of a connection.\n\n"
         + ANNOTATION_SPEC_TEXT
         + "\n"
         + CSS_CLASS_CATALOG
@@ -126,7 +168,12 @@ def parse_schema(tmdl: str) -> str:
     """Convert TMDL to schema JSON.
 
     `tmdl` accepts either:
-      - inline TMDL text (the contents of a single table .tmdl, or concatenated files), OR
+      - inline TMDL text that YOU write (the contents of a single table .tmdl, or
+        concatenated files). This is the supported way to define tables, columns,
+        partitions, AND measures WITHOUT a live Power BI MCP connection — include
+        `measure` blocks directly in the TMDL text and emit_report will write them
+        into the .SemanticModel on disk. You do NOT need Power BI MCP to create
+        measures; SimBI handles the persistence itself.
       - a path to ANY folder containing .tmdl files. All .tmdl files in the folder
         (recursively) are concatenated in sorted order before parsing. Typical sources:
           * a folder produced by Power BI MCP's ExportTMDL / ExportToTmdlFolder, OR
@@ -150,6 +197,39 @@ def parse_schema(tmdl: str) -> str:
                 raise ValueError(f"No .tmdl files found in {candidate}")
     schema = parse_tmdl_schema(tmdl_text)
     return schema.model_dump_json()
+
+
+@mcp.tool()
+def lint_measures(tmdl: str) -> str:
+    """Advisory lint of DAX measures in TMDL text. NOT a correctness check.
+
+    Call this AFTER drafting your TMDL and BEFORE parse_schema, to catch a
+    small set of mechanical mistakes that produce confusing runtime errors:
+
+      ERROR    Reference to a table or column that does not exist in the TMDL.
+               Almost always a typo or stale ref. Must be fixed.
+      WARNING  SEARCH() called without a 4th argument. SEARCH raises a runtime
+               error when the substring is not found; pass a 4th arg (e.g.
+               SEARCH(find, within, 1, BLANK())) or use CONTAINSSTRING.
+      WARNING  Aggregation (SUM/AVERAGE/MIN/MAX/etc.) applied to a column whose
+               name is a 4-digit year (e.g. SUM(t[2026])). Strong signal of a
+               wide-format source that should be unpivoted to Year/Value first.
+
+    Returns:
+      "OK — no lint findings" when nothing triggered, OR a multi-line report
+      with one finding per line. Findings have the form:
+        [SEVERITY] <measure name> (<rule>): <message>
+      A clean report does NOT mean the DAX is semantically correct — it means
+      these specific footguns are absent. Semantic correctness still requires
+      thought.
+
+    This tool is advisory and non-exhaustive. The rule set is deliberately
+    narrow to keep precision high; many real bugs are out of scope.
+    """
+    findings = _lint_measures(tmdl)
+    if not findings:
+        return "OK — no lint findings"
+    return "\n".join(str(f) for f in findings)
 
 
 @mcp.tool()
@@ -203,9 +283,25 @@ async def emit_report(
       Power BI Desktop caches the Report in memory while the file is open.
       Any files SimBI writes to the .Report folder while the file is open will
       be silently ignored when the user reloads — visuals will appear missing.
-      The correct sequence is: (1) use Power BI MCP to build the model,
-      (2) ExportToTmdlFolder → SemanticModel/definition, (3) CLOSE Power BI
-      Desktop, (4) call this tool, (5) open the .pbip fresh.
+
+      Two supported sequences (pick based on whether you have a live Power BI
+      MCP connection — NOT just whether the tool is listed in the catalog):
+
+      Path 1 (no live connection — fully offline, file-based):
+        (1) Write TMDL inline (tables + measure blocks + partitions),
+        (2) parse_schema(tmdl), (3) ensure Power BI Desktop is CLOSED,
+        (4) call this tool — measures are written into .SemanticModel
+        automatically via patch_semantic_model_measures,
+        (5) open the .pbip fresh.
+
+      Path 2 (live Power BI MCP connection already established):
+        (1) Use Power BI MCP to build the model in the live session,
+        (2) ExportToTmdlFolder → SemanticModel/definition,
+        (3) CLOSE Power BI Desktop, (4) parse_schema(<definition folder>),
+        (5) call this tool, (6) open the .pbip fresh.
+
+      If a Power BI MCP call fails with a not-connected error, do not retry —
+      use Path 1 instead. SimBI does not require the live connection.
 
     PREREQUISITE — the .pbip MUST already exist before calling this tool:
       Power BI Desktop or the Power BI MCP creates the .pbip and its
