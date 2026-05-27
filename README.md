@@ -6,26 +6,31 @@ An MCP server that generates Power BI dashboards from natural language. Point it
 
 ## How it works
 
-SimBI chains three phases into two MCP tools and one resource:
+SimBI chains three phases into four MCP tools and one resource:
 
 ```
 .pbip created in Power BI Desktop (required first step)
       │
-      ▼  [MS Power BI MCP]  ← optional: builds the live semantic model
+      ▼  [MS Power BI MCP]  ← OPTIONAL: builds the live semantic model
   Semantic model  ──→  ExportToTmdlFolder → SemanticModel/definition/
+      │                  (skip this branch for Path 1 — write TMDL inline instead)
       │
       ▼  CLOSE Power BI Desktop  ← mandatory before emit_report
       │
-      ▼  parse_schema (reads SemanticModel/definition/)
+      ▼  lint_measures (advisory DAX check — Path 1 inline TMDL)
+      │
+      ▼  parse_schema (inline TMDL or SemanticModel/definition/)
   ModelSchema JSON
       │
-      ▼  [Claude reads simbi://annotation-vocabulary and generates HTML in-context]
+      ▼  [Claude reads simbi://annotation-vocabulary + the DESIGN PRINCIPLES
+      │   in the server instructions, generates HTML in-context]
   Annotated HTML mockup  (data-pbi-* annotations)
       │
       ▼  validate_mockup_html  ← cheap lint before render
       │
-      ▼  emit_report (pbip_path → existing .pbip)
-  <name>.Report/   (Playwright renders HTML → extracts bounding boxes → writes PBIR files)
+      ▼  emit_report (pbip_path → existing .pbip; optional theme_path)
+  <name>.Report/   (Playwright renders HTML → extracts bounding boxes → writes
+                    PBIR files + opinionated SimBIDefault theme baked in)
       │
       ▼  Open .pbip fresh in Power BI Desktop
   Live dashboard
@@ -90,11 +95,35 @@ The `data-pbi-*` HTML annotation spec and CSS class catalog. Claude reads this o
 
 ### `parse_schema`
 
-Converts a TMDL string (from the Power BI MCP's `ExportTMDL` operation) into a SimBI schema JSON that the other tools consume.
+Converts TMDL into a SimBI schema JSON that the other tools consume. Accepts either inline TMDL text **you write yourself** (the supported way to define tables, columns, partitions, *and measures* without a live Power BI MCP connection — `emit_report` writes the measures into the SemanticModel for you) or a path to a folder of `.tmdl` files (e.g. the output of the Power BI MCP's `ExportToTmdlFolder`).
+
+```
+Input:  tmdl: str   ← inline TMDL OR path to a folder of .tmdl files
+Output: ModelSchema JSON string
+```
+
+### `lint_measures`
+
+Advisory lint of DAX measures in TMDL text. **Not** a correctness check — catches a deliberately narrow set of mechanical mistakes that produce confusing runtime errors. Call this after drafting your TMDL and before `parse_schema`.
+
+| Rule | Severity | Catches |
+|---|---|---|
+| `unknown-table` / `unknown-column` | ERROR | Reference to a table/column that doesn't exist in the TMDL (typos, stale refs) |
+| `search-arity` | WARNING | `SEARCH()` called without a 4th argument — raises a runtime error on no-match; use `SEARCH(find, within, 1, BLANK())` or `CONTAINSSTRING(within, find)` instead |
+| `year-literal-aggregation` | WARNING | `SUM`/`AVERAGE`/etc. applied to a column whose name is a 4-digit year (`SUM(t[2026])`) — usually a wide-format source that should be unpivoted to Year/Value first |
 
 ```
 Input:  tmdl: str
-Output: ModelSchema JSON string
+Output: "OK — no lint findings"   OR   one finding per line
+```
+
+### `validate_mockup_html`
+
+Cheap dry-run of the annotated HTML against the schema. No Chrome render, no files written — call it after every HTML edit to iterate on annotations without paying the emit cost.
+
+```
+Input:  html: str, schema_json: str
+Output: "OK — N visuals validated"   OR   raises ValueError with the offending attribute + a correct-shape example
 ```
 
 ### `emit_report`
@@ -102,16 +131,33 @@ Output: ModelSchema JSON string
 Renders an annotated HTML mockup in Chrome, extracts visual bounding boxes, and writes the `.Report/` folder beside an existing `.pbip`.
 
 ```
-Input:  html: str, schema_json: str, pbip_path: str
+Input:  html: str, schema_json: str, pbip_path: str, theme_path: str | None = None
 Output: absolute path to <name>.Report/  ← the written report folder
 Needs:  system Chrome
 ```
 
 `pbip_path` must point to an **existing** `.pbip` file (or a folder containing exactly one). Pass the `.pbip` that Power BI Desktop created — SimBI writes the sibling `.Report/` folder and leaves the `.pbip` and `.SemanticModel/` untouched.
 
+`theme_path` is optional — see [Theming](#theming) below.
+
 **Prerequisites:**
 - Power BI Desktop must be **closed** before calling this tool.
 - The `.pbip` must already exist (created by Power BI Desktop).
+
+## Theming
+
+Every report SimBI emits gets a baked-in theme: Microsoft's `CY25SU10` colour science (categorical palette, semantic green/neutral/red, diverging scale, neutrals, hyperlink colours) **plus** SimBI's opinionated `visualStyles` distilled from the [dashboard design playbook](docs/dashboard-design-playbook.md) — gridlines hidden, no visual borders or headers, lean white cards, consistent Segoe UI label typography. You typically need to do nothing; the default produces a professional-looking dashboard.
+
+If you want to brand the report (corp palette, custom textClasses), pass a **partial** PBIR theme JSON via `theme_path`:
+
+```json
+{
+  "name": "AcmeBrand",
+  "dataColors": ["#003366", "#0066CC", "#3399FF", "#66B2FF", "#99CCFF"]
+}
+```
+
+That partial deep-merges onto SimBI's baseline — your `dataColors` replace Microsoft's, but the `visualStyles` (gridlines off, lean cards, etc.) survive. The resolved theme is written under your `name` and registered as the report's base theme. Pass any subset of a PBIR theme — colours only, typography only, or full `visualStyles` overrides if you want to override SimBI's opinions.
 
 ## End-to-end usage
 
@@ -150,19 +196,26 @@ Build a sales dashboard from this TMDL — measures: Total Revenue (SUM of Reven
 Order Count (COUNTROWS), Avg Unit Price (Revenue / Units). Columns: Region, OrderDate,
 Revenue, Units, Category.
 
-1. Call parse_schema with the TMDL below
-2. Generate annotated HTML with db-page/db-grid/db-card/db-chart-area classes
-3. Call validate_mockup_html
-4. Call emit_report with pbip_path = "C:\Reports\SalesDashboard\SalesDashboard.pbip"
+1. Inspect the source shape (long vs wide). If wide, include an unpivoted table
+   in the TMDL — do NOT aggregate single-period columns like SUM(t[2026]).
+2. Call lint_measures on the TMDL. Fix every ERROR; review WARNINGs.
+3. Call parse_schema with the TMDL
+4. Generate annotated HTML with db-page/db-grid/db-card/db-chart-area classes
+5. Call validate_mockup_html
+6. Call emit_report with pbip_path = "C:\Reports\SalesDashboard\SalesDashboard.pbip"
 
 TMDL: <paste your table TMDL here>
 ```
 
 **What Claude does:**
-1. Calls `parse_schema` with the TMDL
-2. Generates the annotated HTML mockup in-context
-3. Calls `validate_mockup_html`
-4. Calls `emit_report(pbip_path="C:/Reports/SalesDashboard/SalesDashboard.pbip")`
+1. Inspects the source data shape (advised by the server's DESIGN PRINCIPLES guidance)
+2. Calls `lint_measures` and fixes any errors
+3. Calls `parse_schema` with the TMDL
+4. Generates the annotated HTML mockup in-context, following the [design playbook](docs/dashboard-design-playbook.md)
+5. Calls `validate_mockup_html`
+6. Calls `emit_report(pbip_path="C:/Reports/SalesDashboard/SalesDashboard.pbip")`
+
+> **Fallback rule:** if the Power BI MCP is listed but any call returns a "no connection" error, Claude switches to Path 1 automatically — SimBI does not require a live Power BI connection to create measures.
 
 **Step 4 — Open the .pbip fresh in Power BI Desktop.**
 
@@ -278,19 +331,24 @@ src/simbi_mcp/
 ├── server.py          MCP tools (FastMCP)
 ├── semantic/          Phase 1: dataset profiling, measure planning, MS MCP adapter
 ├── mockup/            Phase 2: HTML generator, annotation vocabulary, validator
-└── pbir/              Phase 3: DOM extractor, visual JSON templates, PBIR writer
+├── dax/               DAX linter (advisory checks on measure expressions)
+└── pbir/              Phase 3: DOM extractor, visual JSON templates, PBIR writer + theme resolver
 ```
 
 ## Supported visual types
 
-| Annotation | Power BI visual | Fields |
+SimBI emits **28 Power BI visual types**. The most common six are below; for the full list including data-role contracts and PBIR visualType strings, see [docs/chart-catalog.md](docs/chart-catalog.md) and the implementation-status overlay in [docs/simbi-visual-roadmap.md](docs/simbi-visual-roadmap.md).
+
+| Annotation | Power BI visual | Required fields |
 |---|---|---|
 | `card` | Card | `data-pbi-measure` |
-| `columnChart` | Clustered column chart | `data-pbi-axis`, `data-pbi-values` |
-| `barChart` | Clustered bar chart | `data-pbi-axis`, `data-pbi-values` |
-| `lineChart` | Line chart | `data-pbi-axis`, `data-pbi-values`, `data-pbi-series` (optional) |
+| `columnChart` | Column chart (stacks when `data-pbi-series` is present) | `data-pbi-axis`, `data-pbi-values`, optional `data-pbi-series` |
+| `barChart` | Bar chart (stacks when `data-pbi-series` is present) | `data-pbi-axis`, `data-pbi-values`, optional `data-pbi-series` |
+| `lineChart` | Line chart | `data-pbi-axis`, `data-pbi-values`, optional `data-pbi-series` |
 | `slicer` | Button slicer | `data-pbi-field` |
 | `table` | Table | `data-pbi-columns` (comma-separated — each token is either a bare measure name or a `Table[Column]` ref) |
+
+Also supported: `multiRowCard`, `kpi`, `gauge`, `clusteredColumnChart`, `clusteredBarChart`, `hundredPercentStackedColumnChart`, `hundredPercentStackedBarChart`, `dotPlot`, `areaChart`, `comboChart`, `pieChart`, `donutChart`, `treemap`, `funnelChart`, `histogram`, `scatterChart`, `bubbleChart`, `waterfallChart`, `ribbonChart`, `map`, `filledMap`, `shapeMap`.
 
 ## License
 
