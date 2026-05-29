@@ -140,12 +140,12 @@ mcp: FastMCP = FastMCP(
         "      who cannot find the controls assume there are none.\n"
         "    - Default state: 'Select all'. Do NOT pre-filter unless the\n"
         "      dashboard title explicitly states the scope.\n"
-        "    - SLICER STYLE — always set data-pbi-style on every slicer:\n"
+        "    - SLICER STYLE — REQUIRED on every slicer, no exceptions:\n"
         "        data-pbi-style='dropdown'  text/category fields (default)\n"
         "        data-pbi-style='list'      short enum fields (≤10 items shown)\n"
         "        data-pbi-style='between'   numeric or date range fields (e.g. Year)\n"
-        "      Omitting this attribute causes Power BI to render tile/button\n"
-        "      layout which is unusable without manual resizing.\n\n"
+        "      A slicer without this attribute WILL render as an unusable\n"
+        "      tile/button layout in Power BI Desktop. There is no default.\n\n"
         "  CHART CHOICE\n"
         "    - 'Comparison across categories' → bar/column chart.\n"
         "    - 'Trend over time' → line chart (or area for cumulative).\n"
@@ -406,7 +406,8 @@ async def emit_report(
       <div data-pbi="lineChart"   data-pbi-axis="sales[OrderDate]"
                                   data-pbi-values="Total Revenue"
                                   data-pbi-series="sales[Category]">...</div>
-      <div data-pbi="slicer"      data-pbi-field="sales[Region]">...</div>
+      <div data-pbi="slicer"      data-pbi-field="sales[Region]"   data-pbi-style="dropdown">...</div>
+      <div data-pbi="slicer"      data-pbi-field="sales[Year]"     data-pbi-style="between">...</div>
       <div data-pbi="table"       data-pbi-columns="sales[Region],Total Revenue,Order Count">...</div>
 
     HARD RULES (these are the ONLY accepted shapes — anything else is rejected):
@@ -414,6 +415,8 @@ async def emit_report(
         schema (e.g. "Total Revenue"). Never Table[Column].
       - data-pbi-axis, data-pbi-field, data-pbi-series hold Table[Column] refs
         (e.g. "sales[Region]"). Never a bare measure name.
+      - Every slicer MUST have data-pbi-style="dropdown", "list", or "between".
+        Omitting it is a hard error — Power BI will render an unusable button tile.
       - data-pbi-columns (table visual) is comma-separated; each token is EITHER
         a bare measure name OR a Table[Column] ref. Column tokens become row
         groupings; measure tokens become aggregated value columns.
