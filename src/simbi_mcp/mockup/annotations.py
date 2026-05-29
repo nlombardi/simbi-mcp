@@ -78,7 +78,7 @@ VISUAL_ATTRS: dict[VisualType, VisualAttrSpec] = {
     },
     VisualType.SLICER: {
         "required": ["data-pbi-field"],
-        "optional": [],
+        "optional": ["data-pbi-style"],
     },
     VisualType.TABLE: {
         "required": ["data-pbi-columns"],
@@ -293,6 +293,9 @@ required data-pbi-* attributes shown below.
 
   slicer
     data-pbi-field="<Table>[<Column>]"     ← field to filter on
+    data-pbi-style="dropdown|list|between" ← (optional) slicer style; default "dropdown"
+                                              Use "between" for numeric/date range slicers.
+                                              Use "list" when showing all values inline.
 
   table
     data-pbi-columns="<tok1>,<tok2>,..."   ← comma-separated mix of measure names
