@@ -141,12 +141,44 @@ def test_slicer(schema: ModelSchema) -> None:
     values_proj = result["visual"]["query"]["queryState"]["Values"]["projections"][0]
     assert values_proj["field"]["Column"]["Property"] == "Region"
     assert values_proj["queryRef"] == "sales.Region"
-    # objects.general is required by PBI Desktop to render the advanced slicer
-    assert result["visual"]["objects"] == {"general": [{"properties": {}}]}
+    # objects.general must set style explicitly (empty properties defaults to button/tile)
+    style_val = result["visual"]["objects"]["general"][0]["properties"]["style"]
+    assert style_val == {"expr": {"Literal": {"Value": "'Dropdown'"}}}
     # filterConfig wires up cross-filtering
     fc = result["filterConfig"]["filters"][0]
     assert fc["type"] == "Categorical"
     assert fc["field"]["Column"]["Property"] == "Region"
+
+
+def test_slicer_between_style(schema: ModelSchema) -> None:
+    node = VisualNode(
+        x=0, y=0, width=300, height=60,
+        attrs={"data-pbi": "slicer", "data-pbi-field": "sales[Region]", "data-pbi-style": "between"},
+    )
+    result = build_visual_json(node, z_order=0, schema=schema)
+    style_val = result["visual"]["objects"]["general"][0]["properties"]["style"]
+    assert style_val == {"expr": {"Literal": {"Value": "'Between'"}}}
+    assert result["filterConfig"]["filters"][0]["type"] == "Advanced"
+
+
+def test_slicer_list_style(schema: ModelSchema) -> None:
+    node = VisualNode(
+        x=0, y=0, width=300, height=200,
+        attrs={"data-pbi": "slicer", "data-pbi-field": "sales[Region]", "data-pbi-style": "list"},
+    )
+    result = build_visual_json(node, z_order=0, schema=schema)
+    style_val = result["visual"]["objects"]["general"][0]["properties"]["style"]
+    assert style_val == {"expr": {"Literal": {"Value": "'List'"}}}
+    assert result["filterConfig"]["filters"][0]["type"] == "Categorical"
+
+
+def test_slicer_invalid_style_raises(schema: ModelSchema) -> None:
+    node = VisualNode(
+        x=0, y=0, width=300, height=60,
+        attrs={"data-pbi": "slicer", "data-pbi-field": "sales[Region]", "data-pbi-style": "tiles"},
+    )
+    with pytest.raises(ValueError, match="data-pbi-style"):
+        build_visual_json(node, z_order=0, schema=schema)
 
 
 def test_table_visual_type_is_tableEx(schema: ModelSchema) -> None:

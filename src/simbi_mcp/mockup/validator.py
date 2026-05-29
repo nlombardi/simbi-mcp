@@ -217,6 +217,16 @@ def _validate_node(attrs: dict[str, str], schema: ModelSchema) -> None:
             else:
                 _check_measure(token, schema, "data-pbi-columns", vtype)
 
+    # Validate slicer style — must be one of the three accepted values.
+    if vtype is VisualType.SLICER and "data-pbi-style" in attrs:
+        style = attrs["data-pbi-style"].lower()
+        if style not in ("dropdown", "list", "between"):
+            raise ValidationError(
+                f"data-pbi-style={attrs['data-pbi-style']!r} is invalid. "
+                f"Must be one of: 'dropdown', 'list', 'between'.\n"
+                f"Correct shape:\n{_example_for(vtype)}"
+            )
+
     # Validate multiRowCard measure list — every token must be a measure name.
     if vtype is VisualType.MULTI_ROW_CARD:
         for token in attrs.get("data-pbi-measures", "").split(","):

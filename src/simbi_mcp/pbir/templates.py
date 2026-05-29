@@ -86,14 +86,29 @@ def build_visual_json(
         "visual": visual,
     }
     if vtype is VisualType.SLICER:
-        visual["objects"] = {"general": [{"properties": {}}]}
+        slicer_style = node.attrs.get("data-pbi-style", "dropdown").lower()
+        if slicer_style not in ("dropdown", "list", "between"):
+            raise ValueError(
+                f"data-pbi-style={slicer_style!r} is invalid; use 'dropdown', 'list', or 'between'"
+            )
+        pbi_style = slicer_style.capitalize()  # Dropdown | List | Between
+        visual["objects"] = {
+            "general": [
+                {
+                    "properties": {
+                        "style": {"expr": {"Literal": {"Value": f"'{pbi_style}'"}}}
+                    }
+                }
+            ]
+        }
         col_proj = _column_proj(node.attrs["data-pbi-field"])
+        filter_type = "Advanced" if slicer_style == "between" else "Categorical"
         container["filterConfig"] = {
             "filters": [
                 {
                     "name": _new_guid(),
                     "field": col_proj["field"],
-                    "type": "Categorical",
+                    "type": filter_type,
                 }
             ]
         }
