@@ -280,6 +280,16 @@ def lint_measures(tmdl: str) -> str:
 
       ERROR    Reference to a table or column that does not exist in the TMDL.
                Almost always a typo or stale ref. Must be fixed.
+      ERROR    Relationship GUID is not a valid random UUID. Sequential or
+               hand-crafted GUIDs (e.g. a1b2c3d4-e5f6-7890-abcd-ef1234567890)
+               cause Power BI Desktop to crash with "invalid column ID" on open.
+               Generate a real random UUID for every relationship identifier.
+      ERROR    lineageTag is not a full UUID. Truncated hex tags (20 chars) are
+               silently misread by the TMDL parser. All lineageTag values must be
+               xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx format.
+      ERROR    Calculated table column missing sourceColumn property. Power BI
+               Desktop requires sourceColumn even on calculated tables — it maps
+               to the DAX output column name. Omitting it causes a load failure.
       WARNING  SEARCH() called without a 4th argument. SEARCH raises a runtime
                error when the substring is not found; pass a 4th arg (e.g.
                SEARCH(find, within, 1, BLANK())) or use CONTAINSSTRING.
