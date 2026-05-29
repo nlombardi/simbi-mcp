@@ -168,19 +168,27 @@
         }
       ]
     },
-    "slicer": {
-      "header": [
-        {
-          "show": false
-        }
-      ],
-      "items": [
-        {
-          "fontSize": 11,
-          "fontFamily": "Segoe UI",
-          "fontColor": {"solid": {"color": "#475569"}}
-        }
-      ]
+    "advancedSlicerVisual": {
+      "*": {
+        "layout": [
+          {
+            "maxTiles": 0
+          }
+        ],
+        "header": [
+          {
+            "show": false
+          }
+        ],
+        "value": [
+          {
+            "$id": "default",
+            "fontSize": 11,
+            "fontFamily": "Segoe UI",
+            "fontColor": {"solid": {"color": "#475569"}}
+          }
+        ]
+      }
     },
     "lineChart": {
       "lineStyles": [
