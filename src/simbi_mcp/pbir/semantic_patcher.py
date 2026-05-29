@@ -123,7 +123,6 @@ def _build_minimal_tmdl(
             f"\t\tdataType: {col.data_type}",
             f"\t\tlineageTag: {_new_guid()}",
             f"\t\tsummarizeBy: none",
-            f"\t\tsourceColumn: {col.name}",
             "",
         ]
     return "\n".join(parts)
