@@ -137,13 +137,16 @@ def test_slicer(schema: ModelSchema) -> None:
         attrs={"data-pbi": "slicer", "data-pbi-field": "sales[Region]"},
     )
     result = build_visual_json(node, z_order=2000, schema=schema)
-    assert result["visual"]["visualType"] == "advancedSlicerVisual"
+    # Legacy text slicer — advancedSlicerVisual (button/tile) ignores mode and
+    # clips its tile labels; the classic `slicer` shows text values and honours mode.
+    assert result["visual"]["visualType"] == "slicer"
     values_proj = result["visual"]["query"]["queryState"]["Values"]["projections"][0]
     assert values_proj["field"]["Column"]["Property"] == "Region"
     assert values_proj["queryRef"] == "sales.Region"
-    # objects.general must set style explicitly (empty properties defaults to button/tile)
-    style_val = result["visual"]["objects"]["general"][0]["properties"]["style"]
-    assert style_val == {"expr": {"Literal": {"Value": "'Dropdown'"}}}
+    # objects.data sets mode explicitly (the legacy slicer's mode lives on `data`,
+    # not `general.style` which only exists on advancedSlicerVisual)
+    mode_val = result["visual"]["objects"]["data"][0]["properties"]["mode"]
+    assert mode_val == {"expr": {"Literal": {"Value": "'Dropdown'"}}}
     # filterConfig wires up cross-filtering
     fc = result["filterConfig"]["filters"][0]
     assert fc["type"] == "Categorical"
@@ -156,8 +159,9 @@ def test_slicer_between_style(schema: ModelSchema) -> None:
         attrs={"data-pbi": "slicer", "data-pbi-field": "sales[Region]", "data-pbi-style": "between"},
     )
     result = build_visual_json(node, z_order=0, schema=schema)
-    style_val = result["visual"]["objects"]["general"][0]["properties"]["style"]
-    assert style_val == {"expr": {"Literal": {"Value": "'Between'"}}}
+    assert result["visual"]["visualType"] == "slicer"
+    mode_val = result["visual"]["objects"]["data"][0]["properties"]["mode"]
+    assert mode_val == {"expr": {"Literal": {"Value": "'Between'"}}}
     assert result["filterConfig"]["filters"][0]["type"] == "Advanced"
 
 
@@ -167,8 +171,10 @@ def test_slicer_list_style(schema: ModelSchema) -> None:
         attrs={"data-pbi": "slicer", "data-pbi-field": "sales[Region]", "data-pbi-style": "list"},
     )
     result = build_visual_json(node, z_order=0, schema=schema)
-    style_val = result["visual"]["objects"]["general"][0]["properties"]["style"]
-    assert style_val == {"expr": {"Literal": {"Value": "'List'"}}}
+    assert result["visual"]["visualType"] == "slicer"
+    # "list" maps to the legacy slicer's vertical-list mode, PBIR value 'Basic'
+    mode_val = result["visual"]["objects"]["data"][0]["properties"]["mode"]
+    assert mode_val == {"expr": {"Literal": {"Value": "'Basic'"}}}
     assert result["filterConfig"]["filters"][0]["type"] == "Categorical"
 
 

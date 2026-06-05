@@ -30,7 +30,7 @@ _PBI_VISUAL_TYPE: dict[VisualType, str] = {
     VisualType.COLUMN_CHART: "columnChart",
     VisualType.BAR_CHART: "barChart",
     VisualType.LINE_CHART: "lineChart",
-    VisualType.SLICER: "advancedSlicerVisual",
+    VisualType.SLICER: "slicer",
     VisualType.TABLE: "tableEx",
     VisualType.CLUSTERED_COLUMN_CHART: "clusteredColumnChart",
     VisualType.CLUSTERED_BAR_CHART: "clusteredBarChart",
@@ -91,12 +91,17 @@ def build_visual_json(
             raise ValueError(
                 f"data-pbi-style={slicer_style!r} is invalid; use 'dropdown', 'list', or 'between'"
             )
-        pbi_style = slicer_style.capitalize()  # Dropdown | List | Between
+        # Legacy `slicer` visual mode lives on the `data` card as `mode`.
+        # PBIR values: 'Dropdown' (compact), 'Basic' (vertical list), 'Between'
+        # (range slider). Note 'list' maps to 'Basic' — Power BI's internal name.
+        # advancedSlicerVisual's `general.style` is a different property and
+        # renders empty tiles for these values, so we use the classic slicer.
+        pbi_mode = {"dropdown": "Dropdown", "list": "Basic", "between": "Between"}[slicer_style]
         visual["objects"] = {
-            "general": [
+            "data": [
                 {
                     "properties": {
-                        "style": {"expr": {"Literal": {"Value": f"'{pbi_style}'"}}}
+                        "mode": {"expr": {"Literal": {"Value": f"'{pbi_mode}'"}}}
                     }
                 }
             ]
