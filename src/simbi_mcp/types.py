@@ -106,3 +106,29 @@ class ModelSchema(BaseModel):
             if m.name == name:
                 return m
         raise KeyError(f"No measure named {name!r}")
+
+
+class FieldParameter(BaseModel):
+    """A field parameter: a calc table that swaps which measure a chart shows."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str            # parameter + table name, e.g. "Indicator"
+    measures: list[str]  # measure names to swap between, display order preserved
+
+
+class Bookmark(BaseModel):
+    """A page-state bookmark: captured aspects + which visuals it targets.
+
+    captures: subset of {"visibility", "data", "display", "currentPage"}.
+    target: visual ids the bookmark applies to; [] means all visuals.
+    visible/hidden: visual ids shown/hidden (used when captures includes "visibility").
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    captures: set[str] = Field(default_factory=set)
+    target: list[str] = Field(default_factory=list)
+    visible: list[str] = Field(default_factory=list)
+    hidden: list[str] = Field(default_factory=list)

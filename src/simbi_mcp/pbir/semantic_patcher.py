@@ -15,7 +15,14 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
-from simbi_mcp.types import ModelColumn, ModelMeasure, ModelSchema, ModelTable
+from simbi_mcp.pbir.field_param import build_field_param_tmdl
+from simbi_mcp.types import (
+    FieldParameter,
+    ModelColumn,
+    ModelMeasure,
+    ModelSchema,
+    ModelTable,
+)
 
 
 def patch_semantic_model_measures(schema: ModelSchema, semantic_model_dir: Path) -> None:
@@ -79,6 +86,34 @@ def patch_semantic_model_measures(schema: ModelSchema, semantic_model_dir: Path)
 
     if newly_created:
         _register_ref_tables(semantic_model_dir, newly_created)
+
+
+def patch_field_parameters(
+    field_params: list[FieldParameter],
+    semantic_model_dir: Path,
+    measure_tables: dict[str, str] | None = None,
+) -> None:
+    """Write each field-parameter calc table to TMDL and ref it in model.tmdl.
+
+    The field-parameter table is SimBI-owned and fully regenerable, so it is
+    OVERWRITTEN on every call — re-emitting must pick up a corrected definition
+    (e.g. table-qualified NAMEOF refs) rather than keep a stale file. The
+    `ref table` line is added idempotently via `_register_ref_tables`.
+    """
+    if not field_params:
+        return
+    tables_dir = semantic_model_dir / "definition" / "tables"
+    tables_dir.mkdir(parents=True, exist_ok=True)
+
+    written: list[str] = []
+    for fp in field_params:
+        tmdl_path = tables_dir / f"{fp.name}.tmdl"
+        tmdl_path.write_text(
+            build_field_param_tmdl(fp, measure_tables), encoding="utf-8"
+        )
+        written.append(fp.name)
+
+    _register_ref_tables(semantic_model_dir, written)
 
 
 # ── TMDL text helpers ──────────────────────────────────────────────────────────

@@ -10,13 +10,85 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from simbi_mcp.pbir.extractor import extract_visuals
+from simbi_mcp.pbir.bookmarks import build_bookmark_json, resolve_targets
+from simbi_mcp.pbir.extractor import VisualNode, extract_visuals
+from simbi_mcp.pbir.semantic_patcher import patch_field_parameters
 from simbi_mcp.pbir.templates import build_visual_json
 from simbi_mcp.pbir.theme import resolve_theme
-from simbi_mcp.pbir.writer import write_report
-from simbi_mcp.types import ModelSchema
+from simbi_mcp.pbir.writer import _new_guid, write_report
+from simbi_mcp.types import Bookmark, FieldParameter, ModelSchema
 
 _DASHBOARD_CSS = Path(__file__).parent.parent / "mockup" / "dashboard.css"
+
+
+def _resolve_semantic_model_dir(output_dir: Path, report_name: str, semantic_model_rel_path: str | None) -> Path:
+    """Resolve the SemanticModel dir the same way Power BI resolves definition.pbir's
+    byPath: relative to the .Report folder (output_dir/<name>.Report), not output_dir."""
+    rel = semantic_model_rel_path or f"../{report_name}.SemanticModel"
+    return (output_dir / f"{report_name}.Report" / rel).resolve()
+
+
+def collect_field_params(nodes: list[VisualNode]) -> list[FieldParameter]:
+    """Extract FieldParameter definitions from field-param annotation nodes."""
+    params: list[FieldParameter] = []
+    for node in nodes:
+        if node.attrs.get("data-pbi") == "field-param":
+            name = node.attrs["data-pbi-param-name"]
+            measures = [
+                m.strip()
+                for m in node.attrs["data-pbi-measures"].split(",")
+                if m.strip()
+            ]
+            params.append(FieldParameter(name=name, measures=measures))
+    return params
+
+
+def _split(attr: str) -> list[str]:
+    return [s.strip() for s in attr.split(",") if s.strip()]
+
+
+def collect_bookmarks(nodes: list[VisualNode]) -> list[Bookmark]:
+    """Extract Bookmark definitions from data-pbi="bookmark" annotation nodes."""
+    out: list[Bookmark] = []
+    for node in nodes:
+        if node.attrs.get("data-pbi") == "bookmark":
+            a = node.attrs
+            out.append(Bookmark(
+                name=a["data-pbi-name"],
+                captures=set(_split(a.get("data-pbi-captures", ""))),
+                target=_split(a.get("data-pbi-target", "")) if a.get("data-pbi-target", "all") != "all" else [],
+                visible=_split(a.get("data-pbi-visible", "")),
+                hidden=_split(a.get("data-pbi-hidden", "")),
+            ))
+    return out
+
+
+def resolve_button_actions(visuals: list[dict], bookmark_name_to_guid: dict[str, str]) -> None:
+    """Rewrite each visual's stashed simbiButtonAction into a real visualLink.
+
+    Mutates visuals in place. Bookmark actions become a visualContainerObjects.visualLink
+    referencing the bookmark's generated name id. Non-bookmark actions are simply
+    de-stashed (the button still renders; navigation wiring is out of scope here).
+    """
+    for v in visuals:
+        action = v.pop("simbiButtonAction", None)
+        if not action:
+            continue
+        if action.get("type") == "bookmark":
+            bm_name = action.get("bookmark", "")
+            guid = bookmark_name_to_guid.get(bm_name)
+            if guid is None:
+                raise ValueError(
+                    f"Button references unknown bookmark {bm_name!r}. "
+                    f"Known bookmarks: {sorted(bookmark_name_to_guid)}"
+                )
+            v["visual"].setdefault("visualContainerObjects", {})["visualLink"] = [
+                {"properties": {
+                    "show": {"expr": {"Literal": {"Value": "true"}}},
+                    "type": {"expr": {"Literal": {"Value": "'Bookmark'"}}},
+                    "bookmark": {"expr": {"Literal": {"Value": f"'{guid}'"}}},
+                }}
+            ]
 
 
 async def emit_pbir(
@@ -52,12 +124,39 @@ async def emit_pbir(
 
         nodes = await extract_visuals(html_file)
 
+    # Bookmark nodes are metadata, not rendered visuals — exclude them from
+    # build_visual_json. Field-param nodes DO render a slicer, so keep those.
+    visual_nodes = [n for n in nodes if n.attrs.get("data-pbi") != "bookmark"]
+    field_params_map = {fp.name: fp.measures for fp in collect_field_params(nodes)}
     visuals = [
-        build_visual_json(node, z_order=i * 1000, schema=schema)
-        for i, node in enumerate(nodes)
+        build_visual_json(node, z_order=i * 1000, schema=schema, field_params=field_params_map)
+        for i, node in enumerate(visual_nodes)
     ]
 
     theme = resolve_theme(user_theme_path=theme_path)
+
+    field_params = collect_field_params(nodes)
+    if field_params:
+        semantic_model_dir = _resolve_semantic_model_dir(output_dir, report_name, semantic_model_rel_path)
+        measure_tables = {m.name: m.table for m in schema.measures}
+        patch_field_parameters(field_params, semantic_model_dir, measure_tables)
+
+    # Second pass: resolve bookmarks + button actions against the emitted visuals.
+    bookmarks_meta = collect_bookmarks(nodes)
+    bookmark_dicts: list[dict] | None = None
+    page_guid: str | None = None
+    if bookmarks_meta:
+        page_guid = _new_guid()
+        id_to_guid = {v["simbiId"]: v["name"] for v in visuals if "simbiId" in v}
+        visual_types = {v["name"]: v["visual"]["visualType"] for v in visuals}
+        bookmark_dicts = []
+        name_to_guid: dict[str, str] = {}
+        for bm in bookmarks_meta:
+            resolved = resolve_targets(bm, id_to_guid)
+            bj = build_bookmark_json(resolved, page_guid, visual_types)
+            name_to_guid[bm.name] = bj["name"]
+            bookmark_dicts.append(bj)
+        resolve_button_actions(visuals, name_to_guid)
 
     return write_report(
         visuals=visuals,
@@ -65,4 +164,6 @@ async def emit_pbir(
         output_dir=output_dir,
         semantic_model_rel_path=semantic_model_rel_path,
         theme=theme,
+        bookmarks=bookmark_dicts,
+        page_guid=page_guid,
     )
