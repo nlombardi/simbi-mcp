@@ -43,6 +43,11 @@ class VisualType(StrEnum):
     MAP = "map"
     FILLED_MAP = "filledMap"
     SHAPE_MAP = "shapeMap"
+    FIELD_PARAM = "field-param"
+    SHAPE = "shape"
+    TEXT = "text"
+    BUTTON = "button"
+    BOOKMARK = "bookmark"
 
 
 # Required and optional data-pbi-* attributes per visual type.
@@ -66,15 +71,15 @@ VISUAL_ATTRS: dict[VisualType, VisualAttrSpec] = {
     },
     VisualType.COLUMN_CHART: {
         "required": ["data-pbi-axis", "data-pbi-values"],
-        "optional": ["data-pbi-series"],
+        "optional": ["data-pbi-series", "data-pbi-values-param"],
     },
     VisualType.BAR_CHART: {
         "required": ["data-pbi-axis", "data-pbi-values"],
-        "optional": ["data-pbi-series"],
+        "optional": ["data-pbi-series", "data-pbi-values-param"],
     },
     VisualType.LINE_CHART: {
         "required": ["data-pbi-axis", "data-pbi-values"],
-        "optional": ["data-pbi-series"],
+        "optional": ["data-pbi-series", "data-pbi-values-param", "data-pbi-hidden"],
     },
     VisualType.SLICER: {
         "required": ["data-pbi-field"],
@@ -82,27 +87,27 @@ VISUAL_ATTRS: dict[VisualType, VisualAttrSpec] = {
     },
     VisualType.TABLE: {
         "required": ["data-pbi-columns"],
-        "optional": [],
+        "optional": ["data-pbi-hidden"],
     },
     VisualType.CLUSTERED_COLUMN_CHART: {
         "required": ["data-pbi-axis", "data-pbi-values", "data-pbi-series"],
-        "optional": [],
+        "optional": ["data-pbi-values-param", "data-pbi-hidden"],
     },
     VisualType.CLUSTERED_BAR_CHART: {
         "required": ["data-pbi-axis", "data-pbi-values", "data-pbi-series"],
-        "optional": [],
+        "optional": ["data-pbi-values-param"],
     },
     VisualType.HUNDRED_PERCENT_STACKED_BAR_CHART: {
         "required": ["data-pbi-axis", "data-pbi-values", "data-pbi-series"],
-        "optional": [],
+        "optional": ["data-pbi-values-param"],
     },
     VisualType.HUNDRED_PERCENT_STACKED_COLUMN_CHART: {
         "required": ["data-pbi-axis", "data-pbi-values", "data-pbi-series"],
-        "optional": [],
+        "optional": ["data-pbi-values-param"],
     },
     VisualType.AREA_CHART: {
         "required": ["data-pbi-axis", "data-pbi-values"],
-        "optional": ["data-pbi-series"],
+        "optional": ["data-pbi-series", "data-pbi-values-param"],
     },
     VisualType.PIE_CHART: {
         "required": ["data-pbi-axis", "data-pbi-values"],
@@ -160,6 +165,31 @@ VISUAL_ATTRS: dict[VisualType, VisualAttrSpec] = {
         "required": ["data-pbi-location", "data-pbi-color-saturation"],
         "optional": ["data-pbi-topojson"],
     },
+    VisualType.FIELD_PARAM: {
+        "required": ["data-pbi-param-name", "data-pbi-measures"],
+        "optional": ["data-pbi-style", "data-pbi-id"],
+    },
+    VisualType.SHAPE: {
+        "required": [],
+        "optional": ["data-pbi-shape", "data-pbi-fill", "data-pbi-stroke", "data-pbi-id"],
+    },
+    VisualType.TEXT: {
+        "required": ["data-pbi-text"],
+        "optional": ["data-pbi-role", "data-pbi-color", "data-pbi-id", "data-pbi-title-measure"],
+    },
+    VisualType.BUTTON: {
+        "required": ["data-pbi-action"],
+        "optional": ["data-pbi-text", "data-pbi-bookmark", "data-pbi-id"],
+    },
+    VisualType.BOOKMARK: {
+        "required": ["data-pbi-name"],
+        "optional": [
+            "data-pbi-captures",
+            "data-pbi-target",
+            "data-pbi-visible",
+            "data-pbi-hidden",
+        ],
+    },
 }
 
 # Embedded in generator system prompt — tells Claude the annotation vocabulary.
@@ -190,31 +220,37 @@ required data-pbi-* attributes shown below.
     data-pbi-axis="<Table>[<Column>]"      ← dimension column for X axis
     data-pbi-values="<Measure Name>"       ← measure for Y axis
     data-pbi-series="<Table>[<Column>]"    ← (optional) series/legend split (renders as stacked column)
+    data-pbi-values-param="<ParamName>"    ← (optional) bind Y to a field parameter instead of data-pbi-values
 
   clusteredColumnChart (clustered vertical bars — category on X, series split)
     data-pbi-axis="<Table>[<Column>]"      ← dimension column for X axis
     data-pbi-values="<Measure Name>"       ← measure for Y axis
     data-pbi-series="<Table>[<Column>]"    ← series/legend split for clusters
+    data-pbi-values-param="<ParamName>"    ← (optional) bind Y to a field parameter instead of data-pbi-values
 
   hundredPercentStackedColumnChart (100% stacked vertical bars — category on X)
     data-pbi-axis="<Table>[<Column>]"      ← dimension column for X axis
     data-pbi-values="<Measure Name>"       ← measure for Y axis
     data-pbi-series="<Table>[<Column>]"    ← series/legend split for stacking
+    data-pbi-values-param="<ParamName>"    ← (optional) bind Y to a field parameter instead of data-pbi-values
 
   barChart         (horizontal bars — category on Y axis)
     data-pbi-axis="<Table>[<Column>]"      ← dimension column for Y axis
     data-pbi-values="<Measure Name>"       ← measure for X axis
     data-pbi-series="<Table>[<Column>]"    ← (optional) series/legend split (renders as stacked bar)
+    data-pbi-values-param="<ParamName>"    ← (optional) bind Y to a field parameter instead of data-pbi-values
 
   clusteredBarChart (clustered horizontal bars — category on Y, series split)
     data-pbi-axis="<Table>[<Column>]"      ← dimension column for Y axis
     data-pbi-values="<Measure Name>"       ← measure for X axis
     data-pbi-series="<Table>[<Column>]"    ← series/legend split for clusters
+    data-pbi-values-param="<ParamName>"    ← (optional) bind Y to a field parameter instead of data-pbi-values
 
   hundredPercentStackedBarChart (100% stacked horizontal bars — category on Y)
     data-pbi-axis="<Table>[<Column>]"      ← dimension column for Y axis
     data-pbi-values="<Measure Name>"       ← measure for X axis
     data-pbi-series="<Table>[<Column>]"    ← series/legend split for stacking
+    data-pbi-values-param="<ParamName>"    ← (optional) bind Y to a field parameter instead of data-pbi-values
 
   dotPlot          (dot per category at exact measure value)
     data-pbi-axis="<Table>[<Column>]"      ← category column
@@ -224,11 +260,13 @@ required data-pbi-* attributes shown below.
     data-pbi-axis="<Table>[<Column>]"      ← dimension for X axis
     data-pbi-values="<Measure Name>"       ← measure for Y axis
     data-pbi-series="<Table>[<Column>]"    ← (optional) series/legend split
+    data-pbi-values-param="<ParamName>"    ← (optional) bind Y to a field parameter instead of data-pbi-values
 
   areaChart
     data-pbi-axis="<Table>[<Column>]"      ← dimension for X axis
     data-pbi-values="<Measure Name>"       ← measure for Y axis
     data-pbi-series="<Table>[<Column>]"    ← (optional) series/legend split (renders as stacked area)
+    data-pbi-values-param="<ParamName>"    ← (optional) bind Y to a field parameter instead of data-pbi-values
 
   comboChart       (column + line on shared axis)
     data-pbi-axis="<Table>[<Column>]"      ← shared dimension for X axis
@@ -297,6 +335,40 @@ required data-pbi-* attributes shown below.
                                               Use "between" for numeric/date range slicers.
                                               Use "list" when showing all values inline.
 
+  field-param      (emits a slicer bound to a field parameter's own column)
+    data-pbi-param-name="<ParamName>"      ← field parameter table/column name
+    data-pbi-measures="<M1>, <M2>, ..."    ← comma-separated measures the param switches between
+    data-pbi-style="tabs|dropdown|list"    ← (optional) slicer style; default "tabs"
+
+  shape            (chrome rectangle/line — no data query)
+    data-pbi-shape="rectangle|line"        ← (optional) shape kind; default "rectangle"
+    data-pbi-fill="<color>"                ← (optional) fill color (applied by theme)
+    data-pbi-stroke="<color>"              ← (optional) stroke color (applied by theme)
+
+  text             (chrome textbox — no data query)
+    data-pbi-text="<literal text>"         ← text content of the textbox (shown as-is, or used as
+                                              fallback label when data-pbi-title-measure is set)
+    data-pbi-role="title|subtitle|label|tab" ← (optional) styling role (applied by theme)
+    data-pbi-color="#RRGGBB"               ← (optional) overrides the role color (use white on dark backgrounds)
+    data-pbi-title-measure="<MeasureName>" ← (optional) binds the textbox text to a DAX measure so
+                                              the title updates dynamically (e.g. when a field parameter
+                                              changes). Use this when the title should reflect the
+                                              currently selected indicator/measure. The measure must
+                                              return a string. data-pbi-text still provides the
+                                              fallback visible text in the HTML preview.
+
+  button           (chrome action button — no data query)
+    data-pbi-action="bookmark|navigate|back|reset|blank" ← button behavior
+    data-pbi-text="<label>"                ← (optional) button label text
+    data-pbi-bookmark="<Bookmark Name>"    ← (optional) target bookmark (for action="bookmark")
+
+  bookmark         (page-state metadata — emits no visual; wires buttons/visibility)
+    data-pbi-name="<Bookmark Name>"        ← display name buttons reference via data-pbi-bookmark
+    data-pbi-captures="visibility,data,..." ← (optional) captured aspects (default none)
+    data-pbi-target="<id1>,<id2>"          ← (optional) visual ids it applies to; default all
+    data-pbi-visible="<id1>,<id2>"         ← (optional) visual ids shown
+    data-pbi-hidden="<id1>,<id2>"          ← (optional) visual ids hidden
+
   table
     data-pbi-columns="<tok1>,<tok2>,..."   ← comma-separated mix of measure names
                                               and Table[Column] refs. Each token is
@@ -321,6 +393,9 @@ RULES:
 - data-pbi-bins (histogram) is an integer literal. data-pbi-topojson (shape
   map) is a file path or URL — neither schema-checked.
 - Never invent a measure or column name not present in the schema.
+- data-pbi-hidden="true" may be added to ANY visual to make it hidden on page
+  load (emits a top-level "isHidden": true on the container). Used with
+  bookmarks for view toggles where one chart of a stack defaults visible.
 """
 
 # Embedded in generator system prompt — lists every CSS class Claude may use.
@@ -368,6 +443,7 @@ MEASURE_ATTRS: frozenset[str] = frozenset({
     "data-pbi-y",
     "data-pbi-size",
     "data-pbi-color-saturation",
+    "data-pbi-title-measure",
 })
 COLUMN_REF_ATTRS: frozenset[str] = frozenset({
     "data-pbi-axis",

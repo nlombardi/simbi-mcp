@@ -7,6 +7,7 @@ from simbi_mcp.mockup.validator import ValidationError, validate_mockup
 from simbi_mcp.types import (
     ModelColumn,
     ModelMeasure,
+    ModelRelationship,
     ModelSchema,
     ModelTable,
 )
@@ -265,3 +266,47 @@ def test_filled_map_validates_color_saturation_measure(schema: ModelSchema) -> N
     )
     with pytest.raises(ValidationError, match="GhostMeasure"):
         validate_mockup(html, schema)
+
+
+# ---------- Cross-table axis/series relationship guardrail ----------
+
+
+def _xtable_schema(relationships: list[ModelRelationship]) -> ModelSchema:
+    return ModelSchema(
+        tables=[
+            ModelTable(name="Fact", columns=[ModelColumn(name="Year"), ModelColumn(name="Country")]),
+            ModelTable(name="DimYear", columns=[ModelColumn(name="Year")]),
+        ],
+        measures=[ModelMeasure(name="Rev", table="Fact", expression="SUM(Fact[V])", return_type="number")],
+        relationships=relationships,
+    )
+
+
+def test_cross_table_axis_series_no_relationship_is_fatal() -> None:
+    schema = _xtable_schema([])  # no relationships
+    html = ('<div data-pbi="clusteredColumnChart" data-pbi-axis="DimYear[Year]" '
+            'data-pbi-values="Rev" data-pbi-series="Fact[Country]"></div>')
+    with pytest.raises(ValidationError, match="no.*relationship|relationship connects"):
+        validate_mockup(html, schema)
+
+
+def test_cross_table_axis_series_with_relationship_warns() -> None:
+    schema = _xtable_schema([ModelRelationship(from_table="Fact", from_column="Year", to_table="DimYear", to_column="Year")])
+    html = ('<div data-pbi="clusteredColumnChart" data-pbi-axis="DimYear[Year]" '
+            'data-pbi-values="Rev" data-pbi-series="Fact[Country]"></div>')
+    warnings = validate_mockup(html, schema)
+    assert any("different tables" in w for w in warnings)
+
+
+def test_same_table_axis_series_no_warning() -> None:
+    schema = _xtable_schema([])
+    html = ('<div data-pbi="clusteredColumnChart" data-pbi-axis="Fact[Year]" '
+            'data-pbi-values="Rev" data-pbi-series="Fact[Country]"></div>')
+    warnings = validate_mockup(html, schema)
+    assert warnings == []
+
+
+def test_clean_mockup_returns_empty_warnings() -> None:
+    schema = _xtable_schema([])
+    html = '<div data-pbi="card" data-pbi-measure="Rev"></div>'
+    assert validate_mockup(html, schema) == []
