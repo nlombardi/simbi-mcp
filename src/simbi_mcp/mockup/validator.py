@@ -123,6 +123,14 @@ _EXAMPLES: dict[VisualType, str] = {
         '<div data-pbi="shapeMap" data-pbi-location="sales[Territory]" '
         'data-pbi-color-saturation="Total Revenue"></div>'
     ),
+    VisualType.FIELD_PARAM: (
+        '<div data-pbi="field-param" data-pbi-param-name="Indicator" '
+        'data-pbi-measures="Total Revenue,Order Count"></div>'
+    ),
+    VisualType.SHAPE: '<div data-pbi="shape" data-pbi-shape="rectangle"></div>',
+    VisualType.TEXT: '<div data-pbi="text" data-pbi-text="Section Title" data-pbi-role="title"></div>',
+    VisualType.BUTTON: '<div data-pbi="button" data-pbi-action="bookmark" data-pbi-bookmark="View: Bar" data-pbi-text="Bar"></div>',
+    VisualType.BOOKMARK: '<div data-pbi="bookmark" data-pbi-name="View: Bar" data-pbi-captures="visibility" data-pbi-visible="chartBar" data-pbi-hidden="chartLine"></div>',
 }
 
 
@@ -130,6 +138,21 @@ def _example_for(vtype: VisualType | None) -> str:
     if vtype is None:
         return "\n".join(_EXAMPLES.values())
     return _EXAMPLES[vtype]
+
+
+def _table_of_column_ref(ref: str) -> str | None:
+    m = _COL_REF_RE.match(ref)
+    return m.group(1) if m else None
+
+
+def _tables_related(schema: ModelSchema, a: str, b: str) -> bool:
+    if a == b:
+        return True
+    # Direct relationship only (multi-hop paths are out of scope).
+    for r in schema.relationships:
+        if {r.from_table, r.to_table} == {a, b}:
+            return True
+    return False
 
 
 class ValidationError(Exception):
@@ -156,12 +179,15 @@ def count_annotated_visuals(html: str) -> int:
     return len(collector.nodes)
 
 
-def validate_mockup(html: str, schema: ModelSchema) -> None:
+def validate_mockup(html: str, schema: ModelSchema) -> list[str]:
     """Parse html and validate every data-pbi element against schema.
 
-    Raises ValidationError on the first problem found. Stops at the first
+    Raises ValidationError on the first fatal problem found. Stops at the first
     failure — callers that need all errors should call validate_mockup inside
     a loop with corrected HTML between iterations.
+
+    Returns a list of non-fatal warnings (empty when clean) — e.g. cross-table
+    axis/series that still renders because a relationship exists but is fragile.
     """
     collector = _AnnotationCollector()
     collector.feed(html)
@@ -174,11 +200,13 @@ def validate_mockup(html: str, schema: ModelSchema) -> None:
             f"{_example_for(None)}"
         )
 
+    all_warnings: list[str] = []
     for node in collector.nodes:
-        _validate_node(node, schema)
+        all_warnings.extend(_validate_node(node, schema))
+    return all_warnings
 
 
-def _validate_node(attrs: dict[str, str], schema: ModelSchema) -> None:
+def _validate_node(attrs: dict[str, str], schema: ModelSchema) -> list[str]:
     raw_type = attrs.get("data-pbi", "")
     try:
         vtype = VisualType(raw_type)
@@ -191,6 +219,10 @@ def _validate_node(attrs: dict[str, str], schema: ModelSchema) -> None:
 
     spec = VISUAL_ATTRS[vtype]
     for req in spec["required"]:
+        # Charts bound to a field parameter via data-pbi-values-param do not
+        # also need data-pbi-values — the param supplies the value role.
+        if req == "data-pbi-values" and "data-pbi-values-param" in attrs:
+            continue
         if req not in attrs or not attrs[req].strip():
             raise ValidationError(
                 f"Visual data-pbi={raw_type!r} is missing required attribute "
@@ -227,6 +259,9 @@ def _validate_node(attrs: dict[str, str], schema: ModelSchema) -> None:
                 f"Correct shape:\n{_example_for(vtype)}"
             )
 
+    # field-param's data-pbi-measures is intentionally left unvalidated for now
+    # (measure-list checking for field parameters is out of scope for this task).
+
     # Validate multiRowCard measure list — every token must be a measure name.
     if vtype is VisualType.MULTI_ROW_CARD:
         for token in attrs.get("data-pbi-measures", "").split(","):
@@ -234,6 +269,35 @@ def _validate_node(attrs: dict[str, str], schema: ModelSchema) -> None:
             if not token:
                 continue
             _check_measure(token, schema, "data-pbi-measures", vtype)
+
+    # Cross-table axis/series reliability guardrail. When a chart groups by a
+    # series column on a different table than its axis column, the visual is
+    # blank in Power BI unless a relationship connects the two tables. We only
+    # check when BOTH an axis and a series are present — the series grouping is
+    # the fragile part. (data-pbi-values-param is irrelevant here: this guard is
+    # purely about axis vs series, so the `if axis and series` check covers it.)
+    warnings: list[str] = []
+    axis = attrs.get("data-pbi-axis")
+    series = attrs.get("data-pbi-series")
+    if axis and series:
+        axis_tbl = _table_of_column_ref(axis)
+        series_tbl = _table_of_column_ref(series)
+        if axis_tbl and series_tbl and axis_tbl != series_tbl:
+            if not _tables_related(schema, axis_tbl, series_tbl):
+                raise ValidationError(
+                    f"Visual data-pbi={raw_type!r}: axis column is on table "
+                    f"{axis_tbl!r} but series is on table {series_tbl!r}, and no "
+                    f"relationship connects them. The visual will be blank in Power "
+                    f"BI. Use columns from the same table, or add a relationship.\n"
+                    f"Correct shape:\n{_example_for(vtype)}"
+                )
+            warnings.append(
+                f"Visual data-pbi={raw_type!r}: axis is on {axis_tbl!r} and series "
+                f"on {series_tbl!r} (different tables). A relationship exists so it "
+                f"will render, but cross-table axis/series can behave unexpectedly. "
+                f"Prefer axis + series from the same table when possible."
+            )
+    return warnings
 
 
 def _check_measure(name: str, schema: ModelSchema, attr: str, vtype: VisualType) -> None:

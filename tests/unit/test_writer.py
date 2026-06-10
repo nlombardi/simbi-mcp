@@ -225,3 +225,69 @@ def test_repeat_write_clears_orphan_page_folders(
     guid_dirs = {p.name for p in pages_dir.iterdir() if p.is_dir()}
     assert guid_dirs == {second_guid}
     assert first_guid != second_guid
+
+
+def test_visual_internal_keys_stripped(tmp_path: Path) -> None:
+    """simbiId / simbiButtonAction are internal scaffolding, not valid PBIR."""
+    visual = {
+        "$schema": _VISUAL_SCHEMA,
+        "name": "abcd1234ef5678901234",
+        "simbiId": "chartBar",
+        "simbiButtonAction": {"kind": "bookmark"},
+        "visual": {"visualType": "card"},
+    }
+    report_dir = write_report(
+        visuals=[visual], report_name="TestReport", output_dir=tmp_path
+    )
+    visuals_dir = report_dir / "definition" / "pages"
+    page_guid = json.loads(
+        (visuals_dir / "pages.json").read_text()
+    )["pageOrder"][0]
+    written = json.loads(
+        (visuals_dir / page_guid / "visuals" / "abcd1234ef5678901234" / "visual.json").read_text()
+    )
+    assert "simbiId" not in written
+    assert "simbiButtonAction" not in written
+    assert written["visual"]["visualType"] == "card"
+
+
+def test_bookmarks_written(
+    tmp_path: Path, sample_visuals: list[dict[str, Any]]
+) -> None:
+    """Passing bookmarks writes the index plus one file per bookmark."""
+    bm = {
+        "$schema": "https://example/schema.json",
+        "displayName": "View: Bar",
+        "name": "Bookmarkdeadbeef",
+        "options": {},
+        "explorationState": {},
+    }
+    report_dir = write_report(
+        visuals=sample_visuals,
+        report_name="TestReport",
+        output_dir=tmp_path,
+        bookmarks=[bm],
+    )
+    bdir = report_dir / "definition" / "bookmarks"
+    index = json.loads((bdir / "bookmarks.json").read_text())
+    assert index["items"] == [{"name": "Bookmarkdeadbeef"}]
+    written = json.loads((bdir / "Bookmarkdeadbeef.bookmark.json").read_text())
+    assert written["displayName"] == "View: Bar"
+
+
+def test_repeat_write_clears_orphan_bookmarks(
+    tmp_path: Path, sample_visuals: list[dict[str, Any]]
+) -> None:
+    """Bookmarks dir is wiped each emit so removed bookmarks don't linger."""
+    bm = {"name": "BookmarkOld", "displayName": "Old"}
+    write_report(
+        visuals=sample_visuals, report_name="TestReport",
+        output_dir=tmp_path, bookmarks=[bm],
+    )
+    bdir = tmp_path / "TestReport.Report" / "definition" / "bookmarks"
+    assert (bdir / "BookmarkOld.bookmark.json").exists()
+
+    write_report(
+        visuals=sample_visuals, report_name="TestReport", output_dir=tmp_path
+    )
+    assert not bdir.exists()

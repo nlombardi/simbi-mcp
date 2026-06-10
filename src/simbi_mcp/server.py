@@ -333,10 +333,13 @@ def validate_mockup_html(html: str, schema_json: str) -> str:
     """
     schema = ModelSchema.model_validate_json(schema_json)
     try:
-        validate_mockup(html, schema)
+        warnings = validate_mockup(html, schema)
     except ValidationError as exc:
         raise ValueError(str(exc)) from exc
-    return f"OK — {count_annotated_visuals(html)} visuals validated"
+    msg = f"OK — {count_annotated_visuals(html)} visuals validated"
+    if warnings:
+        msg += "\n\nWarnings:\n" + "\n".join(f"  - {w}" for w in warnings)
+    return msg
 
 
 @mcp.tool()

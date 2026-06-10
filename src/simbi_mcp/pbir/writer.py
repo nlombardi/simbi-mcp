@@ -72,6 +72,8 @@ def write_report(
     output_dir: Path,
     semantic_model_rel_path: str | None = None,
     theme: dict[str, Any] | None = None,
+    bookmarks: list[dict[str, Any]] | None = None,
+    page_guid: str | None = None,
 ) -> Path:
     """Write the PBIR Report folder and return its path.
 
@@ -109,7 +111,13 @@ def write_report(
     if base_themes_dir.exists():
         shutil.rmtree(base_themes_dir)
 
-    page_guid = _new_guid()
+    # Wipe any previous bookmarks/ so renamed or removed bookmarks don't leave
+    # orphan files that Power BI Desktop would still load.
+    bookmarks_dir = report_dir / "definition" / "bookmarks"
+    if bookmarks_dir.exists():
+        shutil.rmtree(bookmarks_dir)
+
+    page_guid = page_guid or _new_guid()
 
     _write_json(
         report_dir / "definition.pbir",
@@ -143,6 +151,7 @@ def write_report(
             raise ValueError(
                 f"visual dict at index {i} is missing required key 'name'"
             ) from exc
+        clean = {k: v for k, v in visual.items() if k not in ("simbiId", "simbiButtonAction")}
         _write_json(
             report_dir
             / "definition"
@@ -151,8 +160,18 @@ def write_report(
             / "visuals"
             / visual_name
             / "visual.json",
-            visual,
+            clean,
         )
+
+    if bookmarks:
+        bdir = report_dir / "definition" / "bookmarks"
+        names = [b["name"] for b in bookmarks]
+        _write_json(bdir / "bookmarks.json", {
+            "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmarksMetadata/1.0.0/schema.json",
+            "items": [{"name": n} for n in names],
+        })
+        for b in bookmarks:
+            _write_json(bdir / f"{b['name']}.bookmark.json", b)
 
     theme_dest = base_themes_dir / f"{theme_name}.json"
     theme_dest.parent.mkdir(parents=True, exist_ok=True)

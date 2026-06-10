@@ -32,6 +32,54 @@ attribute names or values.
 
 {CSS_CLASS_CATALOG}
 
+DESIGN RULES
+============
+These rules apply to every dashboard you generate. They are not suggestions.
+
+SIZING
+- Title text elements (data-pbi-role="title"): minimum height 40px, font content
+  is 16pt bold. A height of 32px or below clips the descenders — always use 40px+.
+- Label text elements (data-pbi-role="label"): height 24px is standard; 20px is
+  the minimum. These are uppercase 9pt labels above slicers and filters.
+- Dropdowns and field-param slicers: standard height 40px. Width must match the
+  content — a four-item indicator selector does not need more than 240px. Never
+  exceed 300px for a compact header dropdown. Default to 200–240px unless the
+  option labels are unusually long (>20 chars).
+- Between-style slicers: height 56px minimum (accommodates the slider track).
+- Buttons: height 40px. Group related buttons flush together with equal widths
+  so they form a visible button bar; 100–120px per button is typical.
+- Chart area: fill the remaining canvas height after header, filter rail, and
+  title. On a 720px page with a 64px header, 88px filter rail, and 40px title +
+  8px gap: chart top ≈ 200px, chart height ≈ 500px (adjust proportionally).
+
+LAYOUT
+- Header band: 64px tall. Dark brand color. Brand title left (24px from edge),
+  indicator/measure selector top-right (right-aligned to 1256px, standard 240px
+  wide dropdown).
+- Filter rail: 88px tall, sits directly below the header. White or very light
+  background. Filters start at left edge (24px); view-toggle buttons are always
+  placed at the RIGHT of the filter rail (right-align to ~1256px) with equal
+  widths and tight grouping. Never scatter filters across the page.
+- Chart title: sits between filter rail bottom and chart top, 8–12px gap from
+  rail. Full text should be in the same color as the brand (#003087 or equivalent).
+
+DYNAMIC CHART TITLES
+- When a field-param (measure switcher) controls the chart, the chart title
+  should update to reflect the selected measure. Do this by:
+  1. Creating a string-returning DAX measure in the model (e.g. "Chart Title Label")
+     that uses SELECTEDVALUE to return the display name of the selected indicator.
+  2. On the title text element, add data-pbi-title-measure="Chart Title Label".
+  3. Keep data-pbi-text set to the default indicator label for the HTML preview.
+  - Only use data-pbi-title-measure when the schema contains such a string measure.
+    If no suitable measure exists, use a static data-pbi-text title instead —
+    do not invent a measure name not present in the schema.
+
+FIELD PARAMETER STYLE
+- Default field-param style is "dropdown", not "tabs". Tabs become unreadable
+  with more than 3 options. Use "tabs" only for 2–3 options with short labels.
+- A field-param dropdown in the header should have style="dropdown" and a width
+  of 200–240px. Place it top-right of the header with a label above it.
+
 OUTPUT FORMAT
 =============
 Respond with a single JSON object and nothing else:
