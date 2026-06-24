@@ -17,21 +17,34 @@ _VIEWPORT: ViewportSize = {"width": 1280, "height": 720}
 
 _JS_EXTRACT = """
 () => {
-  const els = document.querySelectorAll('[data-pbi]');
-  return Array.from(els).map(el => {
-    const r = el.getBoundingClientRect();
-    const data = {};
-    for (const a of el.attributes) {
-      if (a.name.startsWith('data-pbi')) data[a.name] = a.value;
+  const pageContainers = document.querySelectorAll('[data-pbi-page]');
+  const groups = pageContainers.length > 0
+    ? Array.from(pageContainers).map((el, i) => ({
+        el, index: i, name: el.getAttribute('data-pbi-page') || ('Page ' + (i + 1))
+      }))
+    : [{ el: document.documentElement, index: 0, name: 'Page 1' }];
+
+  const result = [];
+  for (const { el: pageEl, index: pageIdx, name: pageName } of groups) {
+    const pageRect = pageEl.getBoundingClientRect();
+    for (const el of pageEl.querySelectorAll('[data-pbi]')) {
+      const r = el.getBoundingClientRect();
+      const data = {};
+      for (const a of el.attributes) {
+        if (a.name.startsWith('data-pbi')) data[a.name] = a.value;
+      }
+      result.push({
+        x: r.x - pageRect.x,
+        y: r.y - pageRect.y,
+        width: r.width,
+        height: r.height,
+        data,
+        page_index: pageIdx,
+        page_name: pageName,
+      });
     }
-    return {
-      x: r.x + window.scrollX,
-      y: r.y + window.scrollY,
-      width: r.width,
-      height: r.height,
-      data: data,
-    };
-  });
+  }
+  return result;
 }
 """
 
@@ -43,6 +56,8 @@ class VisualNode:
     width: float
     height: float
     attrs: dict[str, str]
+    page_index: int = 0
+    page_name: str = "Page 1"
 
     @property
     def visual_type(self) -> VisualType:
@@ -104,6 +119,8 @@ def _parse_js_nodes(raw: list[dict[str, Any]]) -> list[VisualNode]:
             width=float(node["width"]),
             height=float(node["height"]),
             attrs={k: str(v) for k, v in node["data"].items()},
+            page_index=int(node.get("page_index", 0)),
+            page_name=str(node.get("page_name", "Page 1")),
         )
         for node in raw
     ]

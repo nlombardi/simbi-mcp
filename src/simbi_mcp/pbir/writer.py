@@ -15,8 +15,16 @@ from __future__ import annotations
 import json
 import shutil
 import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+
+@dataclass
+class PageSpec:
+    visuals: list[dict[str, Any]] = field(default_factory=list)
+    display_name: str = "Page 1"
+    guid: str | None = None
 
 _STATIC_DIR = Path(__file__).parent / "static"
 
@@ -67,13 +75,12 @@ def _report_json(theme_name: str) -> dict[str, Any]:
 
 def write_report(
     *,
-    visuals: list[dict[str, Any]],
+    pages: list[PageSpec],
     report_name: str,
     output_dir: Path,
     semantic_model_rel_path: str | None = None,
     theme: dict[str, Any] | None = None,
     bookmarks: list[dict[str, Any]] | None = None,
-    page_guid: str | None = None,
 ) -> Path:
     """Write the PBIR Report folder and return its path.
 
@@ -90,8 +97,6 @@ def write_report(
         semantic_model_rel_path = f"../{report_name}.SemanticModel"
 
     if theme is None:
-        # Lazy import keeps theme module out of writer's import path for callers
-        # that pass an explicit theme dict (the common case from emit_pbir).
         from simbi_mcp.pbir.theme import resolve_theme
         theme = resolve_theme(user_theme_path=None)
 
@@ -117,7 +122,12 @@ def write_report(
     if bookmarks_dir.exists():
         shutil.rmtree(bookmarks_dir)
 
-    page_guid = page_guid or _new_guid()
+    # Assign GUIDs to any pages that don't have one yet.
+    for p in pages:
+        if p.guid is None:
+            p.guid = _new_guid()
+
+    page_guids = [p.guid for p in pages]
 
     _write_json(
         report_dir / "definition.pbir",
@@ -130,38 +140,39 @@ def write_report(
     _write_json(report_dir / "definition" / "report.json", _report_json(theme_name))
     _write_json(
         report_dir / "definition" / "pages" / "pages.json",
-        {"$schema": _PAGES_SCHEMA, "pageOrder": [page_guid], "activePageName": page_guid},
-    )
-    _write_json(
-        report_dir / "definition" / "pages" / page_guid / "page.json",
-        {
-            "$schema": _PAGE_SCHEMA,
-            "name": page_guid,
-            "displayName": "Page 1",
-            "displayOption": "FitToPage",
-            "height": 720,
-            "width": 1280,
-        },
+        {"$schema": _PAGES_SCHEMA, "pageOrder": page_guids, "activePageName": page_guids[0]},
     )
 
-    for i, visual in enumerate(visuals):
-        try:
-            visual_name: str = visual["name"]
-        except KeyError as exc:
-            raise ValueError(
-                f"visual dict at index {i} is missing required key 'name'"
-            ) from exc
-        clean = {k: v for k, v in visual.items() if k not in ("simbiId", "simbiButtonAction")}
+    for page in pages:
         _write_json(
-            report_dir
-            / "definition"
-            / "pages"
-            / page_guid
-            / "visuals"
-            / visual_name
-            / "visual.json",
-            clean,
+            report_dir / "definition" / "pages" / page.guid / "page.json",
+            {
+                "$schema": _PAGE_SCHEMA,
+                "name": page.guid,
+                "displayName": page.display_name,
+                "displayOption": "FitToPage",
+                "height": 720,
+                "width": 1280,
+            },
         )
+        for i, visual in enumerate(page.visuals):
+            try:
+                visual_name: str = visual["name"]
+            except KeyError as exc:
+                raise ValueError(
+                    f"visual dict at index {i} is missing required key 'name'"
+                ) from exc
+            clean = {k: v for k, v in visual.items() if k not in ("simbiId", "simbiButtonAction")}
+            _write_json(
+                report_dir
+                / "definition"
+                / "pages"
+                / page.guid
+                / "visuals"
+                / visual_name
+                / "visual.json",
+                clean,
+            )
 
     if bookmarks:
         bdir = report_dir / "definition" / "bookmarks"

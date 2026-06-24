@@ -15,7 +15,7 @@ from simbi_mcp.pbir.extractor import VisualNode, extract_visuals
 from simbi_mcp.pbir.semantic_patcher import patch_field_parameters
 from simbi_mcp.pbir.templates import build_visual_json
 from simbi_mcp.pbir.theme import resolve_theme
-from simbi_mcp.pbir.writer import _new_guid, write_report
+from simbi_mcp.pbir.writer import PageSpec, _new_guid, write_report
 from simbi_mcp.types import Bookmark, FieldParameter, ModelSchema
 
 _DASHBOARD_CSS = Path(__file__).parent.parent / "mockup" / "dashboard.css"
@@ -128,10 +128,14 @@ async def emit_pbir(
     # build_visual_json. Field-param nodes DO render a slicer, so keep those.
     visual_nodes = [n for n in nodes if n.attrs.get("data-pbi") != "bookmark"]
     field_params_map = {fp.name: fp.measures for fp in collect_field_params(nodes)}
-    visuals = [
-        build_visual_json(node, z_order=i * 1000, schema=schema, field_params=field_params_map)
-        for i, node in enumerate(visual_nodes)
-    ]
+
+    # Group visual nodes by page. Nodes from single-page HTML all have page_index=0.
+    page_groups: dict[int, tuple[str, list]] = {}
+    for node in visual_nodes:
+        idx = node.page_index
+        if idx not in page_groups:
+            page_groups[idx] = (node.page_name, [])
+        page_groups[idx][1].append(node)
 
     theme = resolve_theme(user_theme_path=theme_path)
 
@@ -141,14 +145,27 @@ async def emit_pbir(
         measure_tables = {m.name: m.table for m in schema.measures}
         patch_field_parameters(field_params, semantic_model_dir, measure_tables)
 
-    # Second pass: resolve bookmarks + button actions against the emitted visuals.
+    # Build PageSpec list — one entry per page group, in page_index order.
+    page_specs: list[PageSpec] = []
+    all_visuals: list[dict] = []
+    for idx in sorted(page_groups):
+        page_name, group_nodes = page_groups[idx]
+        page_visuals = [
+            build_visual_json(node, z_order=i * 1000, schema=schema, field_params=field_params_map)
+            for i, node in enumerate(group_nodes)
+        ]
+        all_visuals.extend(page_visuals)
+        page_specs.append(PageSpec(visuals=page_visuals, display_name=page_name))
+
+    # Bookmarks reference the first page's GUID (multi-page bookmark scoping
+    # is not yet supported — bookmarks always anchor to page 0).
     bookmarks_meta = collect_bookmarks(nodes)
     bookmark_dicts: list[dict] | None = None
-    page_guid: str | None = None
     if bookmarks_meta:
         page_guid = _new_guid()
-        id_to_guid = {v["simbiId"]: v["name"] for v in visuals if "simbiId" in v}
-        visual_types = {v["name"]: v["visual"]["visualType"] for v in visuals}
+        page_specs[0].guid = page_guid
+        id_to_guid = {v["simbiId"]: v["name"] for v in all_visuals if "simbiId" in v}
+        visual_types = {v["name"]: v["visual"]["visualType"] for v in all_visuals}
         bookmark_dicts = []
         name_to_guid: dict[str, str] = {}
         for bm in bookmarks_meta:
@@ -156,14 +173,13 @@ async def emit_pbir(
             bj = build_bookmark_json(resolved, page_guid, visual_types)
             name_to_guid[bm.name] = bj["name"]
             bookmark_dicts.append(bj)
-        resolve_button_actions(visuals, name_to_guid)
+        resolve_button_actions(all_visuals, name_to_guid)
 
     return write_report(
-        visuals=visuals,
+        pages=page_specs,
         report_name=report_name,
         output_dir=output_dir,
         semantic_model_rel_path=semantic_model_rel_path,
         theme=theme,
         bookmarks=bookmark_dicts,
-        page_guid=page_guid,
     )
