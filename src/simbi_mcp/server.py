@@ -354,6 +354,25 @@ async def emit_report(
     Args:
       html: HTML mockup where every visual element carries a `data-pbi` attribute
             plus the required field bindings (see VOCABULARY below).
+
+            MULTI-PAGE: wrap each page's visuals in a `data-pbi-page` container.
+            The container's attribute value becomes the page display name. All
+            pages must be in a SINGLE html string passed in ONE call to this tool.
+
+              <div data-pbi-page="Overview">
+                <div data-pbi="card" data-pbi-measure="GDP Growth">...</div>
+                ...
+              </div>
+              <div data-pbi-page="Details">
+                <div data-pbi="lineChart" ...>...</div>
+                ...
+              </div>
+
+            NEVER call emit_report multiple times to build a multi-page report —
+            each call wipes the previous pages and corrupts the output. All pages
+            go in ONE call. Without data-pbi-page containers, all visuals land on
+            a single page named "Page 1".
+
       schema_json: the JSON string returned by parse_schema.
       pbip_path: EITHER the absolute path to an EXISTING .pbip file, OR the
             absolute path to a folder that already contains one. When given

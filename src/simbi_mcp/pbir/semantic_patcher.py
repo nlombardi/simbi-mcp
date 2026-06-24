@@ -12,6 +12,7 @@ because those measures will already be in the file and are skipped.
 """
 from __future__ import annotations
 
+import re
 import uuid
 from pathlib import Path
 
@@ -62,7 +63,7 @@ def patch_semantic_model_measures(schema: ModelSchema, semantic_model_dir: Path)
         tmdl_path = tables_dir / f"{table_name}.tmdl"
 
         if tmdl_path.exists():
-            existing = tmdl_path.read_text(encoding="utf-8")
+            existing = _sanitize_tmdl(tmdl_path.read_text(encoding="utf-8"))
             new_measures = [
                 m for m in measures
                 if f"measure '{m.name}'" not in existing
@@ -117,6 +118,20 @@ def patch_field_parameters(
 
 
 # ── TMDL text helpers ──────────────────────────────────────────────────────────
+
+_INVALID_MODE_RE = re.compile(r"^[ \t]+mode:\s+calculated\s*$", re.MULTILINE)
+
+
+def _sanitize_tmdl(tmdl: str) -> str:
+    """Remove TMDL partition properties that Power BI Desktop rejects on open.
+
+    `mode: calculated` is not a valid ModeType (valid values: import,
+    directQuery, dual). DAX-sourced partitions have no mode property at all —
+    the partition source type (= dax) is sufficient. Keeping this line causes a
+    hard parse failure when Power BI Desktop opens the .pbip.
+    """
+    return _INVALID_MODE_RE.sub("", tmdl)
+
 
 def _insert_measures(existing: str, measures: list[ModelMeasure]) -> str:
     """Splice measure blocks into existing TMDL before the first partition block.

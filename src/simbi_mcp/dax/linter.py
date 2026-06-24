@@ -10,6 +10,8 @@ confusing Power BI Desktop load errors. Rules:
     error    calculated table column missing sourceColumn property (required by
              Power BI Desktop's TMDL serializer even for calculated tables)
     error    lineageTag is not a full UUID (truncated hex is silently misread)
+    error    `mode: calculated` in a partition block (not a valid ModeType —
+             crashes Power BI Desktop on open with InvalidValueFormat)
     warning  SEARCH() called without a 4th argument (errors on no-match)
     warning  aggregation of a year-literal column (likely wide-format mistake)
 
@@ -69,6 +71,7 @@ _SEQUENTIAL_GUID_RE = re.compile(
 _RELATIONSHIP_GUID_RE = re.compile(r"^relationship\s+(\S+)\s*$", re.MULTILINE)
 _LINEAGE_TAG_RE = re.compile(r"lineageTag:\s*(\S+)")
 _CALC_TABLE_RE = re.compile(r"partition\s+\S+\s*=\s*calculated", re.IGNORECASE)
+_INVALID_MODE_RE = re.compile(r"^[ \t]+mode:\s+calculated\s*$", re.MULTILINE)
 _TABLE_BLOCK_RE = re.compile(r"^table\s+(\S+)", re.MULTILINE)
 _COLUMN_BLOCK_RE = re.compile(r"^\t(column\s+\S.*)", re.MULTILINE)
 _SOURCE_COL_RE = re.compile(r"\bsourceColumn\s*:", re.IGNORECASE)
@@ -87,6 +90,7 @@ def lint_measures(tmdl: str) -> list[LintFinding]:
     findings.extend(_check_relationship_guids(tmdl))
     findings.extend(_check_lineage_tags(tmdl))
     findings.extend(_check_calc_table_source_columns(tmdl))
+    findings.extend(_check_invalid_partition_mode(tmdl))
 
     # DAX expression checks (per-measure)
     for measure in schema.measures:
@@ -208,6 +212,32 @@ def _check_calc_table_source_columns(tmdl: str) -> list[LintFinding]:
                     ),
                 ))
     return findings
+
+
+def _check_invalid_partition_mode(tmdl: str) -> list[LintFinding]:
+    """Detect `mode: calculated` in any partition block.
+
+    `calculated` is not a valid ModeType in TMDL (valid values: import,
+    directQuery, dual). DAX-sourced partitions express their nature through the
+    `= dax` source type — `mode:` is only for M partitions. Power BI Desktop
+    raises InvalidValueFormat on open when this line is present.
+    """
+    if not _INVALID_MODE_RE.search(tmdl):
+        return []
+    return [
+        LintFinding(
+            severity=LintSeverity.ERROR,
+            measure="(structure)",
+            rule="invalid-partition-mode",
+            message=(
+                "'mode: calculated' is not a valid TMDL ModeType and causes "
+                "Power BI Desktop to refuse loading the model. "
+                "DAX partitions (= dax) do not use a mode property at all. "
+                "M partitions accept 'import', 'directQuery', or 'dual'. "
+                "Remove the 'mode: calculated' line entirely."
+            ),
+        )
+    ]
 
 
 def _check_unknown_refs(
