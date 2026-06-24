@@ -35,7 +35,7 @@ from simbi_mcp.types import (
 
 # Tables may appear at column 0 (per-table file) OR indented under `model Model`
 # (consolidated model.tmdl). Both forms exist in real MS Power BI MCP exports.
-_TABLE_RE = re.compile(r"^[ \t]*table (\S+)\s*$")
+_TABLE_RE = re.compile(r"^[ \t]*table (?:'(.+?)'|(\S+))\s*$")
 _MEASURE_RE = re.compile(r"^[ \t]+measure (?:'(.+?)'|(\S+)) = (.+)$")
 _COLUMN_RE = re.compile(r"^[ \t]+column (.+)$")
 _FORMAT_RE = re.compile(r"^[ \t]+formatString: (.+)$")
@@ -214,7 +214,7 @@ def parse_tmdl_schema(tmdl: str) -> ModelSchema:
             if current:
                 current.finalise_measure()
                 tables.append(current)
-            current = _TableAccumulator(name=m.group(1).strip())
+            current = _TableAccumulator(name=(m.group(1) or m.group(2)).strip())
             in_partition = False
             continue
 
@@ -293,12 +293,12 @@ def _parse_relationships(tmdl: str) -> list[ModelRelationship]:
             continue
         m = _FROM_COL_RE.match(line)
         if m:
-            pending["from_table"] = m.group(1).strip()
+            pending["from_table"] = m.group(1).strip().strip("'")
             pending["from_column"] = m.group(2).strip()
             continue
         m = _TO_COL_RE.match(line)
         if m:
-            pending["to_table"] = m.group(1).strip()
+            pending["to_table"] = m.group(1).strip().strip("'")
             pending["to_column"] = m.group(2).strip()
             continue
         # Boundary: a new top-level construct ends the relationship block.
