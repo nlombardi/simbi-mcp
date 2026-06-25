@@ -21,6 +21,7 @@ from simbi_mcp.mockup.validator import (
     validate_mockup,
 )
 from simbi_mcp.pbir.emitter import emit_pbir
+from simbi_mcp.pbir.reserved_names import sanitize_schema
 from simbi_mcp.pbir.semantic_patcher import patch_semantic_model_measures
 from simbi_mcp.semantic.schema_reader import parse_tmdl_schema
 from simbi_mcp.types import ModelSchema
@@ -267,7 +268,7 @@ def parse_schema(tmdl: str) -> str:
             )
             if not tmdl_text.strip():
                 raise ValueError(f"No .tmdl files found in {candidate}")
-    schema = parse_tmdl_schema(tmdl_text)
+    schema = sanitize_schema(parse_tmdl_schema(tmdl_text))
     return schema.model_dump_json()
 
 
@@ -331,7 +332,7 @@ def validate_mockup_html(html: str, schema_json: str) -> str:
       On failure: raises ValueError with the exact offending attribute and a
       correct-shape example. Fix the HTML and call this tool again.
     """
-    schema = ModelSchema.model_validate_json(schema_json)
+    schema = sanitize_schema(ModelSchema.model_validate_json(schema_json))
     try:
         warnings = validate_mockup(html, schema)
     except ValidationError as exc:
@@ -462,7 +463,7 @@ async def emit_report(
     element that failed and a corrected example — fix the HTML and call again.
     """
     pbip = _resolve_pbip(pbip_path)
-    schema = ModelSchema.model_validate_json(schema_json)
+    schema = sanitize_schema(ModelSchema.model_validate_json(schema_json))
     try:
         validate_mockup(html, schema)
     except ValidationError as exc:
