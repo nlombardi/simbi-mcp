@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from simbi_mcp.pbir.reserved_names import sanitize_schema
 from simbi_mcp.pbir.semantic_patcher import patch_semantic_model_measures
 from simbi_mcp.types import ModelMeasure, ModelSchema, ModelTable, ModelColumn, ModelRelationship
 
@@ -129,3 +130,21 @@ class TestRegisterRefTables:
 
         tmdl_path = tmp_path / "definition" / "tables" / "MacroData.tmdl"
         assert tmdl_path.exists()
+
+    def test_sanitized_schema_never_writes_reserved_measures_table(self, tmp_path):
+        """End-to-end guard: a schema whose measures live in a "Measures" table
+        must, after sanitize_schema, produce a "_Measures.tmdl" — never a
+        "Measures.tmdl" that the AS engine would reject on open."""
+        sm = _scaffold_semantic_model(tmp_path)
+        raw = _make_schema("Measures", "Total Revenue", expr="SUM(Sales[Amt])")
+
+        patch_semantic_model_measures(sanitize_schema(raw), sm)
+
+        tables_dir = sm / "definition" / "tables"
+        assert not (tables_dir / "Measures.tmdl").exists()
+        assert (tables_dir / "_Measures.tmdl").exists()
+        content = (tables_dir / "_Measures.tmdl").read_text(encoding="utf-8")
+        assert content.startswith("table _Measures")
+        model_content = (sm / "definition" / "model.tmdl").read_text(encoding="utf-8")
+        assert "ref table _Measures" in model_content
+        assert "ref table Measures\n" not in model_content
