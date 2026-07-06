@@ -63,16 +63,20 @@ def patch_semantic_model_measures(schema: ModelSchema, semantic_model_dir: Path)
         tmdl_path = tables_dir / f"{table_name}.tmdl"
 
         if tmdl_path.exists():
-            existing = _sanitize_tmdl(tmdl_path.read_text(encoding="utf-8"))
+            original = tmdl_path.read_text(encoding="utf-8")
+            existing = _sanitize_tmdl(original)
             new_measures = [
                 m for m in measures
                 if f"measure '{m.name}'" not in existing
                 and f'measure "{m.name}"' not in existing
             ]
-            if not new_measures:
-                continue  # all measures already present — leave file untouched
-            patched = _insert_measures(existing, new_measures)
-            tmdl_path.write_text(patched, encoding="utf-8")
+            if new_measures:
+                existing = _insert_measures(existing, new_measures)
+            # Write back when measures were inserted OR sanitization repaired the
+            # file. A corrupted partition (e.g. `= dax`) must heal even when all
+            # measures are already present; an already-valid file is left as-is.
+            if existing != original:
+                tmdl_path.write_text(existing, encoding="utf-8")
         else:
             # Create a minimal TMDL — columns + measures, no partition
             tables_dir.mkdir(parents=True, exist_ok=True)
@@ -119,18 +123,53 @@ def patch_field_parameters(
 
 # ── TMDL text helpers ──────────────────────────────────────────────────────────
 
-_INVALID_MODE_RE = re.compile(r"^[ \t]+mode:\s+calculated\s*$", re.MULTILINE)
+_INVALID_MODE_RE = re.compile(r"^([ \t]+mode:[ \t]+)calculated([ \t]*)$", re.MULTILINE)
+_DAX_PARTITION_SOURCE_RE = re.compile(
+    r"^([ \t]*partition[ \t]+.+?[ \t]*=[ \t]*)dax([ \t]*)$", re.MULTILINE
+)
+_CALC_PARTITION_HEADER_RE = re.compile(
+    r"^(?P<indent>[ \t]*)partition[ \t]+.+?[ \t]*=[ \t]*calculated[ \t]*$"
+)
+_MODE_LINE_RE = re.compile(r"^[ \t]+mode:")
 
 
 def _sanitize_tmdl(tmdl: str) -> str:
-    """Remove TMDL partition properties that Power BI Desktop rejects on open.
+    """Repair partition properties that Power BI Desktop rejects on open.
 
-    `mode: calculated` is not a valid ModeType (valid values: import,
-    directQuery, dual). DAX-sourced partitions have no mode property at all —
-    the partition source type (= dax) is sufficient. Keeping this line causes a
-    hard parse failure when Power BI Desktop opens the .pbip.
+    Two corruptions, both produced by acting on an earlier (wrong) lint message:
+
+      - `= dax` is a fictional PartitionSourceType. The valid keyword for a
+        DAX/calculated table is `calculated`; Power BI raises InvalidValueFormat
+        ("Failed to convert the value 'dax' to ... PartitionSourceType") on open.
+      - `mode: calculated` is not a valid ModeType (import, directQuery, dual).
+        Calculated partitions use `mode: import`.
+
+    Rewrites both to the valid form and guarantees every calculated partition
+    carries a `mode: import` line — the known-good shape every fixture uses.
     """
-    return _INVALID_MODE_RE.sub("", tmdl)
+    text = _DAX_PARTITION_SOURCE_RE.sub(r"\1calculated\2", tmdl)
+    text = _INVALID_MODE_RE.sub(r"\1import\2", text)
+    return _ensure_calculated_partition_mode(text)
+
+
+def _ensure_calculated_partition_mode(tmdl: str) -> str:
+    """Insert `mode: import` after any calculated partition header lacking one.
+
+    The mode line is indented one tab deeper than its `partition` header. A
+    header already followed by a `mode:` line is left untouched (idempotent).
+    """
+    lines = tmdl.split("\n")
+    out: list[str] = []
+    for idx, line in enumerate(lines):
+        out.append(line)
+        header = _CALC_PARTITION_HEADER_RE.match(line)
+        if not header:
+            continue
+        nxt = lines[idx + 1] if idx + 1 < len(lines) else ""
+        if _MODE_LINE_RE.match(nxt):
+            continue
+        out.append(f"{header.group('indent')}\tmode: import")
+    return "\n".join(out)
 
 
 def _insert_measures(existing: str, measures: list[ModelMeasure]) -> str:

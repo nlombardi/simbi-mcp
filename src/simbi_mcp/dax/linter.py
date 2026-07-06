@@ -12,6 +12,8 @@ confusing Power BI Desktop load errors. Rules:
     error    lineageTag is not a full UUID (truncated hex is silently misread)
     error    `mode: calculated` in a partition block (not a valid ModeType —
              crashes Power BI Desktop on open with InvalidValueFormat)
+    error    `partition X = dax` source type (no such PartitionSourceType — the
+             valid keyword is `calculated`; crashes on open)
     warning  SEARCH() called without a 4th argument (errors on no-match)
     warning  aggregation of a year-literal column (likely wide-format mistake)
 
@@ -72,6 +74,9 @@ _RELATIONSHIP_GUID_RE = re.compile(r"^relationship\s+(\S+)\s*$", re.MULTILINE)
 _LINEAGE_TAG_RE = re.compile(r"lineageTag:\s*(\S+)")
 _CALC_TABLE_RE = re.compile(r"partition\s+\S+\s*=\s*calculated", re.IGNORECASE)
 _INVALID_MODE_RE = re.compile(r"^[ \t]+mode:\s+calculated\s*$", re.MULTILINE)
+_DAX_PARTITION_SOURCE_RE = re.compile(
+    r"^[ \t]*partition[ \t]+.+?[ \t]*=[ \t]*dax[ \t]*$", re.MULTILINE
+)
 _TABLE_BLOCK_RE = re.compile(r"^table\s+(\S+)", re.MULTILINE)
 _COLUMN_BLOCK_RE = re.compile(r"^\t(column\s+\S.*)", re.MULTILINE)
 _SOURCE_COL_RE = re.compile(r"\bsourceColumn\s*:", re.IGNORECASE)
@@ -91,6 +96,7 @@ def lint_measures(tmdl: str) -> list[LintFinding]:
     findings.extend(_check_lineage_tags(tmdl))
     findings.extend(_check_calc_table_source_columns(tmdl))
     findings.extend(_check_invalid_partition_mode(tmdl))
+    findings.extend(_check_invalid_partition_source(tmdl))
 
     # DAX expression checks (per-measure)
     for measure in schema.measures:
@@ -217,10 +223,10 @@ def _check_calc_table_source_columns(tmdl: str) -> list[LintFinding]:
 def _check_invalid_partition_mode(tmdl: str) -> list[LintFinding]:
     """Detect `mode: calculated` in any partition block.
 
-    `calculated` is not a valid ModeType in TMDL (valid values: import,
-    directQuery, dual). DAX-sourced partitions express their nature through the
-    `= dax` source type — `mode:` is only for M partitions. Power BI Desktop
-    raises InvalidValueFormat on open when this line is present.
+    `calculated` is the partition SOURCE type, not a ModeType. As a `mode:`
+    value it is invalid (valid ModeTypes: import, directQuery, dual) and Power
+    BI Desktop raises InvalidValueFormat on open. A calculated partition keeps
+    `= calculated` and uses `mode: import`.
     """
     if not _INVALID_MODE_RE.search(tmdl):
         return []
@@ -231,10 +237,36 @@ def _check_invalid_partition_mode(tmdl: str) -> list[LintFinding]:
             rule="invalid-partition-mode",
             message=(
                 "'mode: calculated' is not a valid TMDL ModeType and causes "
-                "Power BI Desktop to refuse loading the model. "
-                "DAX partitions (= dax) do not use a mode property at all. "
-                "M partitions accept 'import', 'directQuery', or 'dual'. "
-                "Remove the 'mode: calculated' line entirely."
+                "Power BI Desktop to refuse loading the model "
+                "(valid ModeTypes: import, directQuery, dual). "
+                "Keep the partition's '= calculated' source type and change the "
+                "mode line to 'mode: import'."
+            ),
+        )
+    ]
+
+
+def _check_invalid_partition_source(tmdl: str) -> list[LintFinding]:
+    """Detect the fictional `= dax` partition source type.
+
+    A DAX/calculated table's partition source type is `calculated`, not `dax`.
+    `partition X = dax` makes Power BI Desktop raise InvalidValueFormat on open
+    ("Failed to convert the value 'dax' to ... PartitionSourceType"). This guard
+    exists because an earlier lint message wrongly described the source type as
+    `= dax`; do NOT reintroduce that keyword.
+    """
+    if not _DAX_PARTITION_SOURCE_RE.search(tmdl):
+        return []
+    return [
+        LintFinding(
+            severity=LintSeverity.ERROR,
+            measure="(structure)",
+            rule="invalid-partition-source",
+            message=(
+                "'partition ... = dax' uses a PartitionSourceType that does not "
+                "exist; Power BI Desktop refuses to open the model. The valid "
+                "source type for a DAX/calculated table is 'calculated'. Change "
+                "'= dax' to '= calculated' and add 'mode: import'."
             ),
         )
     ]

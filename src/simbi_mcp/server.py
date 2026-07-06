@@ -21,7 +21,7 @@ from simbi_mcp.mockup.validator import (
     validate_mockup,
 )
 from simbi_mcp.pbir.emitter import emit_pbir
-from simbi_mcp.pbir.reserved_names import sanitize_schema
+from simbi_mcp.pbir.reserved_names import sanitize_schema, sanitize_semantic_model_dir
 from simbi_mcp.pbir.semantic_patcher import patch_semantic_model_measures
 from simbi_mcp.semantic.schema_reader import parse_tmdl_schema
 from simbi_mcp.types import ModelSchema
@@ -59,6 +59,11 @@ mcp: FastMCP = FastMCP(
         "  3. Write TMDL yourself from the inspected source. Include:\n"
         "       - A table block with the correct column names and dataTypes\n"
         "         (string, int64, double, dateTime)\n"
+        "       - NAMING: a table may NOT be named the reserved word 'Measures'\n"
+        "         (Power BI refuses to open the .pbip: \"the name of the object\n"
+        "         'Table' cannot be the reserved string 'Measures'\"). For a\n"
+        "         dedicated measures-holding table use '_Measures' or\n"
+        "         'Key Measures' instead.\n"
         "       - For wide sources: a second table block with an unpivot\n"
         "         partition (M: Table.UnpivotOtherColumns) producing long form\n"
         "       - Measure definitions with DAX expressions and formatStrings\n"
@@ -87,6 +92,9 @@ mcp: FastMCP = FastMCP(
         "  1. Open the .pbip in Power BI Desktop (leave it open).\n"
         "  2. Use the Power BI MCP to build the semantic model (create tables,\n"
         "     measures, relationships, calculated tables, refresh data, etc.).\n"
+        "     NAMING: never create a table named 'Measures' — it is reserved and\n"
+        "     Power BI refuses to open the resulting .pbip. For a disconnected\n"
+        "     measures-holding table use '_Measures' or 'Key Measures'.\n"
         "  3. SYNC TO DISK — call Power BI MCP database_operations\n"
         "     ExportToTmdlFolder, tmdlFolderPath = <Name>.SemanticModel/definition.\n"
         "     Without this step all model changes are lost on next open.\n"
@@ -482,6 +490,11 @@ async def emit_report(
     # present, so Path 2 (measures written by the MS Power BI MCP) is untouched.
     semantic_model_dir = pbip.parent / f"{pbip.stem}.SemanticModel"
     if semantic_model_dir.exists():
+        # Rename any reserved-named table the upstream authoring tool (Power BI
+        # MCP / Desktop) wrote — e.g. "Measures" — BEFORE patching measures, so
+        # the patcher sees the renamed file (measures already present) and the
+        # model matches the report SimBI emitted from the sanitized schema.
+        sanitize_semantic_model_dir(semantic_model_dir)
         patch_semantic_model_measures(schema, semantic_model_dir)
     return str(report_dir)
 

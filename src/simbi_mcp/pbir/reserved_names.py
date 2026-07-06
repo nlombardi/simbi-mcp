@@ -21,6 +21,9 @@ silently break every visual that references the measure.
 """
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 from simbi_mcp.types import ModelSchema
 
 # Lowercased table names rejected by the AS Tabular engine.
@@ -83,3 +86,99 @@ def sanitize_schema(schema: ModelSchema) -> ModelSchema:
             ],
         }
     )
+
+
+# ── On-disk SemanticModel normalization ─────────────────────────────────────────
+#
+# The .SemanticModel is frequently authored by the Power BI MCP / Power BI
+# Desktop / Tabular Editor, NOT by SimBI — and any of those can write a table
+# literally named "Measures" (the conventional disconnected measures table).
+# Those measures never pass through SimBI's ModelSchema, so sanitize_schema()
+# above cannot reach them. SimBI is the last tool to touch the .pbip before the
+# user opens it, so it normalizes the on-disk model here using the SAME
+# safe_table_name() rule — guaranteeing the model and the report (which SimBI
+# emits from the sanitized schema) agree on every table name.
+
+_TABLE_HEADER_RE = re.compile(r"^table\s+(['\"]?)(?P<name>.+?)\1[ \t]*$", re.MULTILINE)
+
+
+def reserved_table_renames(semantic_model_dir: Path) -> dict[str, str]:
+    """Scan the on-disk model and return {old_name: new_name} for reserved tables."""
+    tables_dir = semantic_model_dir / "definition" / "tables"
+    if not tables_dir.is_dir():
+        return {}
+    renames: dict[str, str] = {}
+    for tmdl_path in sorted(tables_dir.glob("*.tmdl")):
+        match = _TABLE_HEADER_RE.search(tmdl_path.read_text(encoding="utf-8"))
+        if not match:
+            continue
+        old = match.group("name")
+        new = safe_table_name(old)
+        if new != old:
+            renames[old] = new
+    return renames
+
+
+def sanitize_semantic_model_dir(semantic_model_dir: Path) -> dict[str, str]:
+    """Rename every reserved-named table in an on-disk SemanticModel, in place.
+
+    For each table whose name is reserved (e.g. "Measures"):
+      - rewrites the `table` header and the same-named `partition` header,
+      - renames the .tmdl file to match the new table name,
+      - updates `model.tmdl`: the `ref table` line and any quoted occurrence in
+        annotations such as PBI_QueryOrder.
+
+    Returns the {old: new} rename map (empty when nothing was reserved) so the
+    caller can keep other artifacts in sync if needed. Idempotent: a second call
+    finds no reserved names and does nothing.
+    """
+    renames = reserved_table_renames(semantic_model_dir)
+    if not renames:
+        return {}
+
+    tables_dir = semantic_model_dir / "definition" / "tables"
+    for tmdl_path in sorted(tables_dir.glob("*.tmdl")):
+        text = tmdl_path.read_text(encoding="utf-8")
+        match = _TABLE_HEADER_RE.search(text)
+        if not match:
+            continue
+        old = match.group("name")
+        new = renames.get(old)
+        if new is None:
+            continue
+        # Rewrite the table header and the partition that shares the table name.
+        text = _TABLE_HEADER_RE.sub(
+            lambda mm: f"table {new}" if mm.group("name") == old else mm.group(0),
+            text,
+            count=1,
+        )
+        text = re.sub(
+            rf"^(?P<indent>[ \t]*partition[ \t]+)(['\"]?){re.escape(old)}\2(?P<rest>[ \t]*=)",
+            rf"\g<indent>{new}\g<rest>",
+            text,
+            flags=re.MULTILINE,
+        )
+        tmdl_path.write_text(text, encoding="utf-8")
+        target = tmdl_path.with_name(f"{new}.tmdl")
+        if target != tmdl_path:
+            tmdl_path.replace(target)
+
+    _apply_renames_to_model_tmdl(semantic_model_dir / "definition" / "model.tmdl", renames)
+    return renames
+
+
+def _apply_renames_to_model_tmdl(model_tmdl: Path, renames: dict[str, str]) -> None:
+    """Update `ref table` lines and quoted annotation references in model.tmdl."""
+    if not model_tmdl.exists():
+        return
+    text = model_tmdl.read_text(encoding="utf-8")
+    for old, new in renames.items():
+        text = re.sub(
+            rf"^(?P<kw>ref[ \t]+table[ \t]+)(['\"]?){re.escape(old)}\2[ \t]*$",
+            rf"\g<kw>{new}",
+            text,
+            flags=re.MULTILINE,
+        )
+        # Quoted occurrences in annotations (e.g. PBI_QueryOrder = [...,"Measures"]).
+        text = text.replace(f'"{old}"', f'"{new}"')
+    model_tmdl.write_text(text, encoding="utf-8")
