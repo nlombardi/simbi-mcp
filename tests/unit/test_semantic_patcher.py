@@ -131,6 +131,60 @@ class TestRegisterRefTables:
         tmdl_path = tmp_path / "definition" / "tables" / "MacroData.tmdl"
         assert tmdl_path.exists()
 
+class TestRepairCorruptedDaxPartition:
+    """A previous session may have written `partition X = dax` (a fictional
+    PartitionSourceType) and deleted the mode line, per a wrong lint message.
+    The patcher must heal those files back to the valid `= calculated` +
+    `mode: import` form on the next emit — even when no new measures are added."""
+
+    def _corrupt_tmdl(self) -> str:
+        return (
+            "table KPI\n"
+            "\tlineageTag: abc\n"
+            "\n"
+            "\tmeasure 'Total' = SUM(KPI[Value])\n"
+            "\t\tlineageTag: def\n"
+            "\n"
+            "\tpartition KPI = dax\n"
+            "\t\tsource = SELECTCOLUMNS(GENERATESERIES(1, 3, 1), \"Value\", [Value])\n"
+        )
+
+    def test_dax_source_rewritten_even_with_no_new_measures(self, tmp_path):
+        sm = _scaffold_semantic_model(tmp_path, existing_refs=["KPI"])
+        tmdl_path = sm / "definition" / "tables" / "KPI.tmdl"
+        tmdl_path.write_text(self._corrupt_tmdl(), encoding="utf-8")
+        # Measure already present → exercises the no-new-measures path.
+        schema = _make_schema("KPI", "Total", expr="SUM(KPI[Value])")
+
+        patch_semantic_model_measures(schema, sm)
+
+        content = tmdl_path.read_text(encoding="utf-8")
+        assert "= dax" not in content
+        assert "partition KPI = calculated" in content
+        assert "mode: import" in content
+
+    def test_mode_calculated_rewritten_to_import(self, tmp_path):
+        sm = _scaffold_semantic_model(tmp_path, existing_refs=["KPI"])
+        tmdl_path = sm / "definition" / "tables" / "KPI.tmdl"
+        tmdl_path.write_text(
+            "table KPI\n"
+            "\tlineageTag: abc\n"
+            "\n"
+            "\tpartition KPI = calculated\n"
+            "\t\tmode: calculated\n"
+            "\t\tsource = {1}\n",
+            encoding="utf-8",
+        )
+        schema = _make_schema("KPI", "Total", expr="SUM(KPI[Value])")
+
+        patch_semantic_model_measures(schema, sm)
+
+        content = tmdl_path.read_text(encoding="utf-8")
+        assert "mode: calculated" not in content
+        assert "mode: import" in content
+
+
+class TestReservedNames:
     def test_sanitized_schema_never_writes_reserved_measures_table(self, tmp_path):
         """End-to-end guard: a schema whose measures live in a "Measures" table
         must, after sanitize_schema, produce a "_Measures.tmdl" — never a

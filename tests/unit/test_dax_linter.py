@@ -251,6 +251,59 @@ class TestCalcTableSourceColumn:
         rules = [f.rule for f in findings]
         assert "calc-table-missing-sourcecolumn" not in rules
 
+
+_DAX_SOURCE_TYPE_TMDL = """\
+table Years
+\tlineageTag: a1b2c3d4-e5f6-4a5b-8c9d-ef0123456789
+
+\tpartition Years = dax
+\t\tsource = SELECTCOLUMNS(GENERATESERIES(1980, 2031, 1), "Year", [Value])
+"""
+
+
+class TestInvalidPartitionSource:
+    def test_dax_source_type_is_error(self) -> None:
+        findings = lint_measures(_DAX_SOURCE_TYPE_TMDL)
+        rules = [f.rule for f in findings]
+        assert "invalid-partition-source" in rules
+
+    def test_dax_source_type_error_severity(self) -> None:
+        findings = lint_measures(_DAX_SOURCE_TYPE_TMDL)
+        bad = [f for f in findings if f.rule == "invalid-partition-source"]
+        assert bad and all(f.severity == LintSeverity.ERROR for f in bad)
+
+    def test_calculated_source_type_is_clean(self) -> None:
+        findings = lint_measures(_CALC_TABLE_WITH_SOURCE_COL)
+        rules = [f.rule for f in findings]
+        assert "invalid-partition-source" not in rules
+
+
+_INVALID_MODE_TMDL = """\
+table Years
+\tlineageTag: a1b2c3d4-e5f6-4a5b-8c9d-ef0123456789
+
+\tpartition Years = calculated
+\t\tmode: calculated
+\t\tsource = SELECTCOLUMNS(GENERATESERIES(1980, 2031, 1), "Year", [Value])
+"""
+
+
+class TestInvalidPartitionMode:
+    def test_mode_calculated_is_error(self) -> None:
+        findings = lint_measures(_INVALID_MODE_TMDL)
+        rules = [f.rule for f in findings]
+        assert "invalid-partition-mode" in rules
+
+    def test_mode_message_recommends_import_not_dax(self) -> None:
+        findings = [
+            f for f in lint_measures(_INVALID_MODE_TMDL)
+            if f.rule == "invalid-partition-mode"
+        ]
+        assert findings
+        msg = findings[0].message.lower()
+        assert "import" in msg
+        assert "= dax" not in msg
+
     def test_m_partition_table_without_source_column_is_clean(self) -> None:
         # M-partition tables don't require sourceColumn in the linter
         tmdl = _tmdl("SUM(Sales[Revenue])")
