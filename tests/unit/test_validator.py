@@ -433,3 +433,33 @@ def test_barchart_category_axis_does_not_warn() -> None:
 def test_columnchart_year_axis_does_not_warn() -> None:
     html = '<div data-pbi="columnChart" data-pbi-axis="gdp[Year]" data-pbi-values="GDP"></div>'
     assert validate_mockup(html, _schema_with_year()) == []
+
+
+# ---------- Inline style warnings ----------
+
+
+def test_inline_color_warns(schema) -> None:
+    html = (
+        '<div data-pbi="card" data-pbi-measure="Total Revenue" '
+        'style="color: red; background-color: #fff"></div>'
+    )
+    warnings = validate_mockup(html, schema)
+    assert any("'color'" in w and "does not transfer" in w for w in warnings)
+    assert not any("background-color" in w for w in warnings)  # honored, no warning
+
+
+def test_inline_gradient_warns(schema) -> None:
+    html = (
+        '<div data-pbi="card" data-pbi-measure="Total Revenue" '
+        'style="background: linear-gradient(#fff, #000)"></div>'
+    )
+    warnings = validate_mockup(html, schema)
+    assert any("gradient" in w for w in warnings)
+
+
+def test_inline_layout_props_do_not_warn(schema) -> None:
+    html = (
+        '<div data-pbi="card" data-pbi-measure="Total Revenue" '
+        'style="position:absolute; left:10px; top:10px; width:200px; height:100px"></div>'
+    )
+    assert validate_mockup(html, schema) == []
