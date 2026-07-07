@@ -30,6 +30,10 @@ _HBAR_TYPES: frozenset[VisualType] = frozenset({
     VisualType.HUNDRED_PERCENT_STACKED_BAR_CHART,
 })
 _NAME_TOKEN_RE = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])|\d+")
+_UNSUPPORTED_INLINE_PROPS: frozenset[str] = frozenset({
+    "color", "font-family", "font-size", "font-weight", "font-style",
+    "opacity", "text-align", "background-image",
+})
 
 
 def _example_for(vtype: VisualType | None) -> str:
@@ -153,6 +157,30 @@ def _bar_time_axis_warning(
     return None
 
 
+def _inline_style_warnings(attrs: dict[str, str]) -> list[str]:
+    """Warn about inline CSS that will NOT transfer to Power BI. Only inline
+    styles are checked — computed styles always resolve to a value, so checking
+    them would flag every element."""
+    out: list[str] = []
+    label = attrs.get("data-pbi", "?")
+    for decl in attrs.get("style", "").split(";"):
+        prop, sep, value = decl.partition(":")
+        if not sep:
+            continue
+        prop = prop.strip().lower()
+        if prop in _UNSUPPORTED_INLINE_PROPS:
+            out.append(
+                f"Visual data-pbi={label!r}: inline '{prop}' does not transfer to "
+                f"Power BI — use the theme, data-pbi-role, or data-pbi-color instead."
+            )
+        elif "gradient(" in value:
+            out.append(
+                f"Visual data-pbi={label!r}: inline '{prop}' uses a gradient, which does "
+                f"not transfer to Power BI — only solid colors transfer."
+            )
+    return out
+
+
 def _validate_node(attrs: dict[str, str], schema: ModelSchema) -> list[str]:
     raw_type = attrs.get("data-pbi", "")
     try:
@@ -254,6 +282,9 @@ def _validate_node(attrs: dict[str, str], schema: ModelSchema) -> list[str]:
     bar_time_warning = _bar_time_axis_warning(vtype, attrs, schema)
     if bar_time_warning:
         warnings.append(bar_time_warning)
+
+    # Check for inline styles that will not transfer to Power BI
+    warnings.extend(_inline_style_warnings(attrs))
 
     return warnings
 
