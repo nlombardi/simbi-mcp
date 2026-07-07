@@ -9,135 +9,22 @@ from __future__ import annotations
 import re
 from html.parser import HTMLParser
 
-from simbi_mcp.mockup.annotations import COLUMN_REF_ATTRS, MEASURE_ATTRS, VISUAL_ATTRS, VisualType
+from simbi_mcp.mockup.annotations import (
+    COLUMN_REF_ATTRS,
+    EXAMPLES,
+    MEASURE_ATTRS,
+    VISUAL_ATTRS,
+    VisualType,
+)
 from simbi_mcp.types import ModelSchema
 
 _COL_REF_RE = re.compile(r"^(.+)\[(.+)\]$")
 
-# Concrete correct-shape example per visual type — appended to every error
-# so the LLM client gets an actionable template, not just a complaint.
-_EXAMPLES: dict[VisualType, str] = {
-    VisualType.CARD: '<div data-pbi="card" data-pbi-measure="Total Revenue"></div>',
-    VisualType.COLUMN_CHART: (
-        '<div data-pbi="columnChart" data-pbi-axis="sales[Region]" '
-        'data-pbi-values="Total Revenue"></div>'
-    ),
-    VisualType.BAR_CHART: (
-        '<div data-pbi="barChart" data-pbi-axis="sales[Region]" '
-        'data-pbi-values="Total Revenue"></div>'
-    ),
-    VisualType.LINE_CHART: (
-        '<div data-pbi="lineChart" data-pbi-axis="sales[OrderDate]" '
-        'data-pbi-values="Total Revenue"></div>'
-    ),
-    VisualType.SLICER: '<div data-pbi="slicer" data-pbi-field="sales[Region]"></div>',
-    VisualType.TABLE: (
-        '<div data-pbi="table" '
-        'data-pbi-columns="sales[Region],Total Revenue,Order Count"></div>'
-    ),
-    VisualType.CLUSTERED_COLUMN_CHART: (
-        '<div data-pbi="clusteredColumnChart" data-pbi-axis="sales[Region]" '
-        'data-pbi-values="Total Revenue" data-pbi-series="sales[OrderDate]"></div>'
-    ),
-    VisualType.CLUSTERED_BAR_CHART: (
-        '<div data-pbi="clusteredBarChart" data-pbi-axis="sales[Region]" '
-        'data-pbi-values="Total Revenue" data-pbi-series="sales[OrderDate]"></div>'
-    ),
-    VisualType.HUNDRED_PERCENT_STACKED_BAR_CHART: (
-        '<div data-pbi="hundredPercentStackedBarChart" data-pbi-axis="sales[Region]" '
-        'data-pbi-values="Total Revenue" data-pbi-series="sales[OrderDate]"></div>'
-    ),
-    VisualType.HUNDRED_PERCENT_STACKED_COLUMN_CHART: (
-        '<div data-pbi="hundredPercentStackedColumnChart" data-pbi-axis="sales[Region]" '
-        'data-pbi-values="Total Revenue" data-pbi-series="sales[OrderDate]"></div>'
-    ),
-    VisualType.AREA_CHART: (
-        '<div data-pbi="areaChart" data-pbi-axis="sales[OrderDate]" '
-        'data-pbi-values="Total Revenue"></div>'
-    ),
-    VisualType.PIE_CHART: (
-        '<div data-pbi="pieChart" data-pbi-axis="sales[Region]" '
-        'data-pbi-values="Total Revenue"></div>'
-    ),
-    VisualType.DONUT_CHART: (
-        '<div data-pbi="donutChart" data-pbi-axis="sales[Region]" '
-        'data-pbi-values="Total Revenue"></div>'
-    ),
-    VisualType.MULTI_ROW_CARD: (
-        '<div data-pbi="multiRowCard" '
-        'data-pbi-measures="Total Revenue,Order Count"></div>'
-    ),
-    VisualType.KPI: (
-        '<div data-pbi="kpi" data-pbi-measure="Total Revenue" '
-        'data-pbi-target="Revenue Target" data-pbi-trend="sales[OrderDate]"></div>'
-    ),
-    VisualType.GAUGE: (
-        '<div data-pbi="gauge" data-pbi-measure="Total Revenue" '
-        'data-pbi-target="Revenue Target"></div>'
-    ),
-    VisualType.DOT_PLOT: (
-        '<div data-pbi="dotPlot" data-pbi-axis="sales[Region]" '
-        'data-pbi-values="Total Revenue"></div>'
-    ),
-    VisualType.COMBO_CHART: (
-        '<div data-pbi="comboChart" data-pbi-axis="sales[OrderDate]" '
-        'data-pbi-column-values="Total Revenue" data-pbi-line-values="Gross Margin"></div>'
-    ),
-    VisualType.TREEMAP: (
-        '<div data-pbi="treemap" data-pbi-group="sales[Region]" '
-        'data-pbi-values="Total Revenue"></div>'
-    ),
-    VisualType.FUNNEL_CHART: (
-        '<div data-pbi="funnelChart" data-pbi-axis="sales[Stage]" '
-        'data-pbi-values="Lead Count"></div>'
-    ),
-    VisualType.HISTOGRAM: (
-        '<div data-pbi="histogram" data-pbi-values="Order Value" data-pbi-bins="20"></div>'
-    ),
-    VisualType.SCATTER_CHART: (
-        '<div data-pbi="scatterChart" data-pbi-x="Ad Spend" '
-        'data-pbi-y="Total Revenue" data-pbi-details="sales[Market]"></div>'
-    ),
-    VisualType.BUBBLE_CHART: (
-        '<div data-pbi="bubbleChart" data-pbi-x="Ad Spend" '
-        'data-pbi-y="Total Revenue" data-pbi-size="Order Count" '
-        'data-pbi-details="sales[Market]"></div>'
-    ),
-    VisualType.WATERFALL_CHART: (
-        '<div data-pbi="waterfallChart" data-pbi-axis="sales[Driver]" '
-        'data-pbi-values="Variance"></div>'
-    ),
-    VisualType.RIBBON_CHART: (
-        '<div data-pbi="ribbonChart" data-pbi-axis="sales[OrderDate]" '
-        'data-pbi-values="Total Revenue" data-pbi-series="sales[Category]"></div>'
-    ),
-    VisualType.MAP: (
-        '<div data-pbi="map" data-pbi-location="sales[City]" '
-        'data-pbi-size="Total Revenue"></div>'
-    ),
-    VisualType.FILLED_MAP: (
-        '<div data-pbi="filledMap" data-pbi-location="sales[Country]" '
-        'data-pbi-color-saturation="Total Revenue"></div>'
-    ),
-    VisualType.SHAPE_MAP: (
-        '<div data-pbi="shapeMap" data-pbi-location="sales[Territory]" '
-        'data-pbi-color-saturation="Total Revenue"></div>'
-    ),
-    VisualType.FIELD_PARAM: (
-        '<div data-pbi="field-param" data-pbi-param-name="Indicator" '
-        'data-pbi-measures="Total Revenue,Order Count"></div>'
-    ),
-    VisualType.SHAPE: '<div data-pbi="shape" data-pbi-shape="rectangle"></div>',
-    VisualType.TEXT: '<div data-pbi="text" data-pbi-text="Section Title" data-pbi-role="title"></div>',
-    VisualType.BUTTON: '<div data-pbi="button" data-pbi-action="bookmark" data-pbi-bookmark="View: Bar" data-pbi-text="Bar"></div>',
-    VisualType.BOOKMARK: '<div data-pbi="bookmark" data-pbi-name="View: Bar" data-pbi-captures="visibility" data-pbi-visible="chartBar" data-pbi-hidden="chartLine"></div>',
-}
-
 
 def _example_for(vtype: VisualType | None) -> str:
     if vtype is None:
-        return "\n".join(_EXAMPLES.values())
-    return _EXAMPLES[vtype]
+        return "\n".join(EXAMPLES.values())
+    return EXAMPLES[vtype]
 
 
 def _table_of_column_ref(ref: str) -> str | None:

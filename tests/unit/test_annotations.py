@@ -121,3 +121,41 @@ def test_annotation_spec_text_mentions_all_types() -> None:
 def test_css_class_catalog_mentions_core_classes() -> None:
     for cls in ("db-page", "db-grid", "db-card", "db-chart-area", "db-slicer-items"):
         assert cls in CSS_CLASS_CATALOG, f"Missing {cls} in CSS_CLASS_CATALOG"
+
+
+from simbi_mcp.mockup.annotations import EXAMPLES, UNIVERSAL_ATTRS
+
+
+def test_visual_attrs_values_are_described_dicts() -> None:
+    for vtype, spec in VISUAL_ATTRS.items():
+        assert isinstance(spec["required"], dict), f"{vtype}: required must be a dict"
+        assert isinstance(spec["optional"], dict), f"{vtype}: optional must be a dict"
+        assert isinstance(spec["note"], str), f"{vtype}: note must be a str"
+        for attr, desc in {**spec["required"], **spec["optional"]}.items():
+            assert attr.startswith("data-pbi-"), f"{vtype}: bad attr name {attr}"
+            assert desc.strip(), f"{vtype}: {attr} has an empty description"
+
+
+def test_universal_attrs_not_duplicated_per_type() -> None:
+    assert set(UNIVERSAL_ATTRS) == {"data-pbi-id", "data-pbi-hidden"}
+    for vtype, spec in VISUAL_ATTRS.items():
+        if vtype is VisualType.BOOKMARK:
+            continue  # bookmark's data-pbi-hidden is an id list, deliberately shadows
+        for attr in UNIVERSAL_ATTRS:
+            assert attr not in spec["required"], f"{vtype} duplicates universal {attr}"
+            assert attr not in spec["optional"], f"{vtype} duplicates universal {attr}"
+
+
+def test_bar_column_notes_present() -> None:
+    assert "HORIZONTAL" in VISUAL_ATTRS[VisualType.BAR_CHART]["note"]
+    assert "columnChart" in VISUAL_ATTRS[VisualType.BAR_CHART]["note"]
+    assert "VERTICAL" in VISUAL_ATTRS[VisualType.COLUMN_CHART]["note"]
+
+
+def test_every_type_has_an_example() -> None:
+    assert set(EXAMPLES) == set(VisualType)
+
+
+def test_chart_examples_show_data_pbi_id() -> None:
+    assert "data-pbi-id" in EXAMPLES[VisualType.LINE_CHART]
+    assert "data-pbi-id" in EXAMPLES[VisualType.BAR_CHART]
