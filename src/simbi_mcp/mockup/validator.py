@@ -21,6 +21,15 @@ from simbi_mcp.mockup.annotations import (
 from simbi_mcp.types import ModelSchema
 
 _COL_REF_RE = re.compile(r"^(.+)\[(.+)\]$")
+_TIME_TOKENS: frozenset[str] = frozenset(
+    {"year", "date", "month", "quarter", "period", "week", "day", "time"}
+)
+_HBAR_TYPES: frozenset[VisualType] = frozenset({
+    VisualType.BAR_CHART,
+    VisualType.CLUSTERED_BAR_CHART,
+    VisualType.HUNDRED_PERCENT_STACKED_BAR_CHART,
+})
+_NAME_TOKEN_RE = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])|\d+")
 
 
 def _example_for(vtype: VisualType | None) -> str:
@@ -120,6 +129,30 @@ def validate_mockup(html: str, schema: ModelSchema) -> list[str]:
     return all_warnings
 
 
+def _bar_time_axis_warning(
+    vtype: VisualType, attrs: dict[str, str], schema: ModelSchema
+) -> str | None:
+    if vtype not in _HBAR_TYPES:
+        return None
+    ref = attrs.get("data-pbi-axis", "")
+    m = _COL_REF_RE.match(ref)
+    if not m:
+        return None
+    table_name, col_name = m.group(1), m.group(2)
+    table = next((t for t in schema.tables if t.name == table_name), None)
+    col = next((c for c in table.columns if c.name == col_name), None) if table else None
+    is_datetime = col is not None and col.data_type.lower() == "datetime"
+    tokens = {t.lower() for t in _NAME_TOKEN_RE.findall(col_name)}
+    if is_datetime or tokens & _TIME_TOKENS:
+        return (
+            f"Visual data-pbi={vtype.value!r}: {vtype.value} draws HORIZONTAL bars, and "
+            f"axis column {ref!r} looks like a time dimension. Time on the axis usually "
+            f"wants columnChart (vertical) or lineChart. Keep {vtype.value} only if "
+            f"horizontal category rows are intended."
+        )
+    return None
+
+
 def _validate_node(attrs: dict[str, str], schema: ModelSchema) -> list[str]:
     raw_type = attrs.get("data-pbi", "")
     try:
@@ -216,6 +249,12 @@ def _validate_node(attrs: dict[str, str], schema: ModelSchema) -> list[str]:
                 f"will render, but cross-table axis/series can behave unexpectedly. "
                 f"Prefer axis + series from the same table when possible."
             )
+
+    # Check for bar chart time-axis heuristic warning
+    bar_time_warning = _bar_time_axis_warning(vtype, attrs, schema)
+    if bar_time_warning:
+        warnings.append(bar_time_warning)
+
     return warnings
 
 
