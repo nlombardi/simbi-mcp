@@ -13,6 +13,7 @@ from pathlib import Path
 from simbi_mcp.pbir.bookmarks import build_bookmark_json, resolve_targets
 from simbi_mcp.pbir.extractor import VisualNode, extract_visuals
 from simbi_mcp.pbir.semantic_patcher import patch_field_parameters
+from simbi_mcp.pbir.styling import page_background_card
 from simbi_mcp.pbir.templates import build_visual_json
 from simbi_mcp.pbir.theme import resolve_theme
 from simbi_mcp.pbir.writer import PageSpec, _new_guid, write_report
@@ -131,12 +132,12 @@ async def emit_pbir(
     field_params_map = {fp.name: fp.measures for fp in collect_field_params(nodes)}
 
     # Group visual nodes by page. Nodes from single-page HTML all have page_index=0.
-    page_groups: dict[int, tuple[str, list]] = {}
+    page_groups: dict[int, tuple[str, str, list]] = {}
     for node in visual_nodes:
         idx = node.page_index
         if idx not in page_groups:
-            page_groups[idx] = (node.page_name, [])
-        page_groups[idx][1].append(node)
+            page_groups[idx] = (node.page_name, node.page_background, [])
+        page_groups[idx][2].append(node)
 
     theme = resolve_theme(user_theme_path=theme_path)
 
@@ -150,13 +151,17 @@ async def emit_pbir(
     page_specs: list[PageSpec] = []
     all_visuals: list[dict] = []
     for idx in sorted(page_groups):
-        page_name, group_nodes = page_groups[idx]
+        page_name, page_bg, group_nodes = page_groups[idx]
         page_visuals = [
             build_visual_json(node, z_order=i * 1000, schema=schema, field_params=field_params_map)
             for i, node in enumerate(group_nodes)
         ]
         all_visuals.extend(page_visuals)
-        page_specs.append(PageSpec(visuals=page_visuals, display_name=page_name))
+        page_specs.append(PageSpec(
+            visuals=page_visuals,
+            display_name=page_name,
+            background=page_background_card(page_bg),
+        ))
 
     # Bookmarks reference the first page's GUID (multi-page bookmark scoping
     # is not yet supported — bookmarks always anchor to page 0).
