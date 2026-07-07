@@ -311,3 +311,30 @@ def test_multi_page_report(tmp_path: Path, sample_visuals: list[dict[str, Any]])
     for guid, expected_name in zip(pages_meta["pageOrder"], ["Overview", "Details"]):
         page_content = json.loads((pages_dir / guid / "page.json").read_text())
         assert page_content["displayName"] == expected_name
+
+
+def _minimal_visual() -> dict:
+    return {"name": "abc123", "position": {"x": 0, "y": 0, "z": 0, "height": 100, "width": 100, "tabOrder": 0}, "visual": {"visualType": "card"}}
+
+
+def test_page_background_written(tmp_path) -> None:
+    from simbi_mcp.pbir.styling import page_background_card
+
+    spec = PageSpec(
+        visuals=[_minimal_visual()],
+        display_name="Overview",
+        background=page_background_card("rgb(241, 245, 249)"),
+    )
+    report_dir = write_report(pages=[spec], report_name="R", output_dir=tmp_path)
+    page_dir = next((report_dir / "definition" / "pages").glob("*/page.json"))
+    page = json.loads(page_dir.read_text(encoding="utf-8"))
+    color = page["objects"]["background"][0]["properties"]["color"]
+    assert color == {"solid": {"color": {"expr": {"Literal": {"Value": "'#F1F5F9'"}}}}}
+
+
+def test_page_without_background_has_no_objects(tmp_path) -> None:
+    spec = PageSpec(visuals=[_minimal_visual()], display_name="Overview")
+    report_dir = write_report(pages=[spec], report_name="R", output_dir=tmp_path)
+    page_dir = next((report_dir / "definition" / "pages").glob("*/page.json"))
+    page = json.loads(page_dir.read_text(encoding="utf-8"))
+    assert "objects" not in page

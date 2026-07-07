@@ -25,6 +25,7 @@ class PageSpec:
     visuals: list[dict[str, Any]] = field(default_factory=list)
     display_name: str = "Page 1"
     guid: str | None = None
+    background: list[dict[str, Any]] | None = None
 
 _STATIC_DIR = Path(__file__).parent / "static"
 
@@ -144,16 +145,19 @@ def write_report(
     )
 
     for page in pages:
+        page_json: dict[str, Any] = {
+            "$schema": _PAGE_SCHEMA,
+            "name": page.guid,
+            "displayName": page.display_name,
+            "displayOption": "FitToPage",
+            "height": 720,
+            "width": 1280,
+        }
+        if page.background:
+            page_json["objects"] = {"background": page.background}
         _write_json(
             report_dir / "definition" / "pages" / page.guid / "page.json",
-            {
-                "$schema": _PAGE_SCHEMA,
-                "name": page.guid,
-                "displayName": page.display_name,
-                "displayOption": "FitToPage",
-                "height": 720,
-                "width": 1280,
-            },
+            page_json,
         )
         for i, visual in enumerate(page.visuals):
             try:
