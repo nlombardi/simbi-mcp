@@ -496,193 +496,9 @@ EXAMPLES: dict[VisualType, str] = {
     VisualType.BOOKMARK: '<div data-pbi="bookmark" data-pbi-name="View: Bar" data-pbi-captures="visibility" data-pbi-visible="chartBar" data-pbi-hidden="chartLine"></div>',
 }
 
-# Embedded in generator system prompt — tells Claude the annotation vocabulary.
-ANNOTATION_SPEC_TEXT: str = """\
-ANNOTATION VOCABULARY
-=====================
-Every visual must have a data-pbi attribute identifying its type, plus the
-required data-pbi-* attributes shown below.
-
-  card
-    data-pbi-measure="<Measure Name>"      ← exact measure name from the schema
-
-  multiRowCard
-    data-pbi-measures="<M1>, <M2>, ..."    ← comma-separated measure names
-
-  kpi
-    data-pbi-measure="<Indicator Measure>" ← actual / current measure
-    data-pbi-target="<Target Measure>"     ← goal measure
-    data-pbi-trend="<Table>[<Column>]"     ← date column for trend axis
-
-  gauge
-    data-pbi-measure="<Value Measure>"     ← current value (needle)
-    data-pbi-min="<Measure>"               ← (optional) minimum (arc start)
-    data-pbi-max="<Measure>"               ← (optional) maximum (arc end)
-    data-pbi-target="<Measure>"            ← (optional) target marker
-
-  columnChart      (vertical bars — category on X axis)
-    data-pbi-axis="<Table>[<Column>]"      ← dimension column for X axis
-    data-pbi-values="<Measure Name>"       ← measure for Y axis
-    data-pbi-series="<Table>[<Column>]"    ← (optional) series/legend split (renders as stacked column)
-    data-pbi-values-param="<ParamName>"    ← (optional) bind Y to a field parameter instead of data-pbi-values
-
-  clusteredColumnChart (clustered vertical bars — category on X, series split)
-    data-pbi-axis="<Table>[<Column>]"      ← dimension column for X axis
-    data-pbi-values="<Measure Name>"       ← measure for Y axis
-    data-pbi-series="<Table>[<Column>]"    ← series/legend split for clusters
-    data-pbi-values-param="<ParamName>"    ← (optional) bind Y to a field parameter instead of data-pbi-values
-
-  hundredPercentStackedColumnChart (100% stacked vertical bars — category on X)
-    data-pbi-axis="<Table>[<Column>]"      ← dimension column for X axis
-    data-pbi-values="<Measure Name>"       ← measure for Y axis
-    data-pbi-series="<Table>[<Column>]"    ← series/legend split for stacking
-    data-pbi-values-param="<ParamName>"    ← (optional) bind Y to a field parameter instead of data-pbi-values
-
-  barChart         (horizontal bars — category on Y axis)
-    data-pbi-axis="<Table>[<Column>]"      ← dimension column for Y axis
-    data-pbi-values="<Measure Name>"       ← measure for X axis
-    data-pbi-series="<Table>[<Column>]"    ← (optional) series/legend split (renders as stacked bar)
-    data-pbi-values-param="<ParamName>"    ← (optional) bind Y to a field parameter instead of data-pbi-values
-
-  clusteredBarChart (clustered horizontal bars — category on Y, series split)
-    data-pbi-axis="<Table>[<Column>]"      ← dimension column for Y axis
-    data-pbi-values="<Measure Name>"       ← measure for X axis
-    data-pbi-series="<Table>[<Column>]"    ← series/legend split for clusters
-    data-pbi-values-param="<ParamName>"    ← (optional) bind Y to a field parameter instead of data-pbi-values
-
-  hundredPercentStackedBarChart (100% stacked horizontal bars — category on Y)
-    data-pbi-axis="<Table>[<Column>]"      ← dimension column for Y axis
-    data-pbi-values="<Measure Name>"       ← measure for X axis
-    data-pbi-series="<Table>[<Column>]"    ← series/legend split for stacking
-    data-pbi-values-param="<ParamName>"    ← (optional) bind Y to a field parameter instead of data-pbi-values
-
-  dotPlot          (dot per category at exact measure value)
-    data-pbi-axis="<Table>[<Column>]"      ← category column
-    data-pbi-values="<Measure Name>"       ← measure plotted as dot position
-
-  lineChart
-    data-pbi-axis="<Table>[<Column>]"      ← dimension for X axis
-    data-pbi-values="<Measure Name>"       ← measure for Y axis
-    data-pbi-series="<Table>[<Column>]"    ← (optional) series/legend split
-    data-pbi-values-param="<ParamName>"    ← (optional) bind Y to a field parameter instead of data-pbi-values
-
-  areaChart
-    data-pbi-axis="<Table>[<Column>]"      ← dimension for X axis
-    data-pbi-values="<Measure Name>"       ← measure for Y axis
-    data-pbi-series="<Table>[<Column>]"    ← (optional) series/legend split (renders as stacked area)
-    data-pbi-values-param="<ParamName>"    ← (optional) bind Y to a field parameter instead of data-pbi-values
-
-  comboChart       (column + line on shared axis)
-    data-pbi-axis="<Table>[<Column>]"      ← shared dimension for X axis
-    data-pbi-column-values="<Measure>"     ← measure rendered as columns
-    data-pbi-line-values="<Measure>"       ← measure rendered as line
-
-  pieChart
-    data-pbi-axis="<Table>[<Column>]"      ← category dimension for slices
-    data-pbi-values="<Measure Name>"       ← measure for slice size
-
-  donutChart
-    data-pbi-axis="<Table>[<Column>]"      ← category dimension for slices
-    data-pbi-values="<Measure Name>"       ← measure for slice size
-
-  treemap
-    data-pbi-group="<Table>[<Column>]"     ← primary category column
-    data-pbi-values="<Measure Name>"       ← measure for rectangle size
-    data-pbi-details="<Table>[<Column>]"   ← (optional) secondary hierarchy column
-
-  funnelChart
-    data-pbi-axis="<Table>[<Column>]"      ← stage column (preserve source order)
-    data-pbi-values="<Measure Name>"       ← measure per stage
-
-  histogram        (renders as a binned barChart in PBIR)
-    data-pbi-values="<Measure Name>"       ← measure to bin
-    data-pbi-bins="<int>"                  ← (optional) bin count
-
-  scatterChart
-    data-pbi-x="<X Measure>"               ← measure on X axis
-    data-pbi-y="<Y Measure>"               ← measure on Y axis
-    data-pbi-details="<Table>[<Column>]"   ← (optional) per-point label/group
-
-  bubbleChart      (scatter with bubble size = third measure)
-    data-pbi-x="<X Measure>"               ← measure on X axis
-    data-pbi-y="<Y Measure>"               ← measure on Y axis
-    data-pbi-size="<Size Measure>"         ← measure for bubble size
-    data-pbi-details="<Table>[<Column>]"   ← (optional) per-point label/group
-
-  waterfallChart
-    data-pbi-axis="<Table>[<Column>]"      ← ordered category/stage column
-    data-pbi-values="<Measure Name>"       ← delta measure per category
-    data-pbi-breakdown="<Table>[<Column>]" ← (optional) sub-group dimension
-
-  ribbonChart      (rank changes over time)
-    data-pbi-axis="<Table>[<Column>]"      ← time/period column
-    data-pbi-values="<Measure Name>"       ← measure determining rank
-    data-pbi-series="<Table>[<Column>]"    ← ranked category column
-
-  map              (bubble map; requires Bing geocoding in tenant)
-    data-pbi-location="<Table>[<Column>]"  ← place/lat-lon column
-    data-pbi-size="<Size Measure>"         ← bubble size measure
-    data-pbi-legend="<Table>[<Column>]"    ← (optional) category legend
-
-  filledMap        (choropleth; requires Bing geocoding in tenant)
-    data-pbi-location="<Table>[<Column>]"  ← region column
-    data-pbi-color-saturation="<Measure>"  ← measure driving fill intensity
-
-  shapeMap         (custom TopoJSON regions)
-    data-pbi-location="<Table>[<Column>]"  ← region-key column matching TopoJSON
-    data-pbi-color-saturation="<Measure>"  ← measure driving fill intensity
-    data-pbi-topojson="<path-or-url>"      ← (optional) user-supplied TopoJSON
-
-  slicer
-    data-pbi-field="<Table>[<Column>]"     ← field to filter on
-    data-pbi-style="dropdown|list|between" ← (optional) slicer style; default "dropdown"
-                                              Use "between" for numeric/date range slicers.
-                                              Use "list" when showing all values inline.
-
-  field-param      (emits a slicer bound to a field parameter's own column)
-    data-pbi-param-name="<ParamName>"      ← field parameter table/column name
-    data-pbi-measures="<M1>, <M2>, ..."    ← comma-separated measures the param switches between
-    data-pbi-style="tabs|dropdown|list"    ← (optional) slicer style; default "tabs"
-
-  shape            (chrome rectangle/line — no data query)
-    data-pbi-shape="rectangle|line"        ← (optional) shape kind; default "rectangle"
-    data-pbi-fill="<color>"                ← (optional) fill color (applied by theme)
-    data-pbi-stroke="<color>"              ← (optional) stroke color (applied by theme)
-
-  text             (chrome textbox — no data query)
-    data-pbi-text="<literal text>"         ← text content of the textbox (shown as-is, or used as
-                                              fallback label when data-pbi-title-measure is set)
-    data-pbi-role="title|subtitle|label|tab" ← (optional) styling role (applied by theme)
-    data-pbi-color="#RRGGBB"               ← (optional) overrides the role color (use white on dark backgrounds)
-    data-pbi-title-measure="<MeasureName>" ← (optional) binds the textbox text to a DAX measure so
-                                              the title updates dynamically (e.g. when a field parameter
-                                              changes). Use this when the title should reflect the
-                                              currently selected indicator/measure. The measure must
-                                              return a string. data-pbi-text still provides the
-                                              fallback visible text in the HTML preview.
-
-  button           (chrome action button — no data query)
-    data-pbi-action="bookmark|navigate|back|reset|blank" ← button behavior
-    data-pbi-text="<label>"                ← (optional) button label text
-    data-pbi-bookmark="<Bookmark Name>"    ← (optional) target bookmark (for action="bookmark")
-
-  bookmark         (page-state metadata — emits no visual; wires buttons/visibility)
-    data-pbi-name="<Bookmark Name>"        ← display name buttons reference via data-pbi-bookmark
-    data-pbi-captures="visibility,data,..." ← (optional) captured aspects (default none)
-    data-pbi-target="<id1>,<id2>"          ← (optional) visual ids it applies to; default all
-    data-pbi-visible="<id1>,<id2>"         ← (optional) visual ids shown
-    data-pbi-hidden="<id1>,<id2>"          ← (optional) visual ids hidden
-
-  table
-    data-pbi-columns="<tok1>,<tok2>,..."   ← comma-separated mix of measure names
-                                              and Table[Column] refs. Each token is
-                                              independently either a bare measure name
-                                              (e.g. "Total Revenue") or a column ref
-                                              (e.g. "sales[Region]"). Column tokens
-                                              become row groupings; measure tokens
-                                              become aggregated value columns.
-
-RULES:
+RULES_TEXT: str = """\
+RULES
+=====
 - Measure-valued attributes hold a bare measure name from the schema (e.g.
   "Total Revenue"): data-pbi-measure, data-pbi-values, data-pbi-target,
   data-pbi-min, data-pbi-max, data-pbi-column-values, data-pbi-line-values,
@@ -694,13 +510,61 @@ RULES:
 - Multi-token attributes (data-pbi-columns on table, data-pbi-measures on
   multiRowCard) are comma-separated; tokens of each kind validated per
   position.
-- data-pbi-bins (histogram) is an integer literal. data-pbi-topojson (shape
-  map) is a file path or URL — neither schema-checked.
 - Never invent a measure or column name not present in the schema.
-- data-pbi-hidden="true" may be added to ANY visual to make it hidden on page
-  load (emits a top-level "isHidden": true on the container). Used with
-  bookmarks for view toggles where one chart of a stack defaults visible.
+- Unknown or misspelled data-pbi-* attributes are a HARD ERROR.
 """
+
+STYLING_CONTRACT_TEXT: str = """\
+STYLING CONTRACT — WYSIWYG CSS transfer
+=======================================
+SimBI reads the COMPUTED CSS of every data-pbi element and transfers:
+  background-color -> visual background (color; alpha becomes transparency)
+  border           -> visual border (color, width)
+  border-radius    -> rounded corners
+  box-shadow       -> visual drop shadow (FIRST layer only)
+On data-pbi="shape" the same properties style the SHAPE GEOMETRY instead:
+  background-color (or data-pbi-fill) -> fill; border (or data-pbi-stroke)
+  -> outline; border-radius -> roundEdge. Explicit data-pbi-* attributes
+  beat CSS.
+A data-pbi-page container's background-color becomes the page background.
+NOT transferred (use theme, data-pbi-role, or data-pbi-color instead):
+color, font-*, opacity, gradients, text-align. Declaring these INLINE on a
+data-pbi element triggers a validator warning.
+"""
+
+
+def build_annotation_spec() -> str:
+    """Render the full annotation vocabulary from VISUAL_ATTRS — the single
+    source of truth. Regenerated at import; consumed by the get_vocabulary
+    tool, the MCP resource, and the mockup generator prompt."""
+    lines: list[str] = [
+        "ANNOTATION VOCABULARY",
+        "=====================",
+        "Every visual must have a data-pbi attribute identifying its type, plus",
+        "that type's (required) attributes below. (optional) attributes refine it.",
+        "",
+    ]
+    for vtype, spec in VISUAL_ATTRS.items():
+        lines.append(f"  {vtype.value}")
+        if spec["note"]:
+            lines.append(f"    NOTE: {spec['note']}")
+        for attr, desc in spec["required"].items():
+            lines.append(f"    {attr} (required) {desc}")
+        for attr, desc in spec["optional"].items():
+            lines.append(f"    {attr} (optional) {desc}")
+        lines.append(f"    Example: {EXAMPLES[vtype]}")
+        lines.append("")
+    lines += [
+        "UNIVERSAL ATTRIBUTES — valid on EVERY visual type",
+        "=================================================",
+    ]
+    for attr, desc in UNIVERSAL_ATTRS.items():
+        lines.append(f"  {attr} {desc}")
+    lines += ["", RULES_TEXT, STYLING_CONTRACT_TEXT]
+    return "\n".join(lines)
+
+
+ANNOTATION_SPEC_TEXT: str = build_annotation_spec()
 
 # Embedded in generator system prompt — lists every CSS class Claude may use.
 CSS_CLASS_CATALOG: str = """\
