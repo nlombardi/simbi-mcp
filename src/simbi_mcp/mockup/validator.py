@@ -6,6 +6,7 @@ that does not exist in the schema — catching hallucinations before Phase 3.
 """
 from __future__ import annotations
 
+import difflib
 import re
 from html.parser import HTMLParser
 
@@ -13,6 +14,7 @@ from simbi_mcp.mockup.annotations import (
     COLUMN_REF_ATTRS,
     EXAMPLES,
     MEASURE_ATTRS,
+    UNIVERSAL_ATTRS,
     VISUAL_ATTRS,
     VisualType,
 )
@@ -25,6 +27,27 @@ def _example_for(vtype: VisualType | None) -> str:
     if vtype is None:
         return "\n".join(EXAMPLES.values())
     return EXAMPLES[vtype]
+
+
+def _check_unknown_attrs(attrs: dict[str, str], vtype: VisualType, raw_type: str) -> None:
+    spec = VISUAL_ATTRS[vtype]
+    allowed = (
+        {"data-pbi", "data-pbi-page"}
+        | set(UNIVERSAL_ATTRS)
+        | set(spec["required"])
+        | set(spec["optional"])
+    )
+    for attr in attrs:
+        if not attr.startswith("data-pbi") or attr in allowed:
+            continue
+        suggestion = difflib.get_close_matches(attr, sorted(allowed - {"data-pbi", "data-pbi-page"}), n=1)
+        hint = f" Did you mean {suggestion[0]!r}?" if suggestion else ""
+        raise ValidationError(
+            f"Unknown attribute {attr!r} on data-pbi={raw_type!r}.{hint}\n"
+            f"Valid attributes for {raw_type}: "
+            f"{sorted(allowed - {'data-pbi', 'data-pbi-page'})}\n"
+            f"Correct shape:\n{_example_for(vtype)}"
+        )
 
 
 def _table_of_column_ref(ref: str) -> str | None:
@@ -103,6 +126,8 @@ def _validate_node(attrs: dict[str, str], schema: ModelSchema) -> list[str]:
             f"Must be one of: {[v.value for v in VisualType]}\n"
             f"Correct shapes for each type:\n{_example_for(None)}"
         ) from e
+
+    _check_unknown_attrs(attrs, vtype, raw_type)
 
     spec = VISUAL_ATTRS[vtype]
     for req in spec["required"]:

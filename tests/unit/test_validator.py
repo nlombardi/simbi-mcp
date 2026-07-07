@@ -310,3 +310,31 @@ def test_clean_mockup_returns_empty_warnings() -> None:
     schema = _xtable_schema([])
     html = '<div data-pbi="card" data-pbi-measure="Rev"></div>'
     assert validate_mockup(html, schema) == []
+
+
+def test_unknown_attr_is_hard_error_with_suggestion(schema) -> None:
+    html = '<div data-pbi="shape" data-pbi-fil="#ff0000" style="width:10px;height:10px"></div>'
+    with pytest.raises(ValidationError, match="data-pbi-fill"):
+        validate_mockup(html, schema)
+
+
+def test_unknown_attr_error_lists_valid_attrs(schema) -> None:
+    html = '<div data-pbi="card" data-pbi-measure="Total Revenue" data-pbi-nonsense="x"></div>'
+    with pytest.raises(ValidationError, match="data-pbi-measure"):
+        validate_mockup(html, schema)
+
+
+def test_universal_attrs_accepted_on_every_type(schema) -> None:
+    html = (
+        '<div data-pbi="card" data-pbi-measure="Total Revenue" '
+        'data-pbi-id="kpi1" data-pbi-hidden="true"></div>'
+    )
+    assert validate_mockup(html, schema) == []
+
+
+def test_non_data_pbi_attrs_ignored(schema) -> None:
+    html = (
+        '<div class="db-card" id="x" style="color:red" '
+        'data-pbi="card" data-pbi-measure="Total Revenue"></div>'
+    )
+    validate_mockup(html, schema)  # must not raise
