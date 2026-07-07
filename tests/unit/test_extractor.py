@@ -96,3 +96,38 @@ def test_parse_js_nodes_invalid_visual_type_raises_on_access() -> None:
     nodes = _parse_js_nodes(raw)
     with pytest.raises(ValueError, match="decompositionTree"):
         _ = nodes[0].visual_type
+
+
+from simbi_mcp.pbir.extractor import ExtractResult, _safe_filename
+
+
+def test_parse_js_nodes_carries_styles() -> None:
+    raw = [{
+        "x": 0, "y": 0, "width": 100, "height": 100,
+        "data": {"data-pbi": "card", "data-pbi-measure": "M"},
+        "styles": {"backgroundColor": "rgb(255, 255, 255)", "boxShadow": "none"},
+        "page_background": "rgb(241, 245, 249)",
+    }]
+    nodes = _parse_js_nodes(raw)
+    assert nodes[0].styles["backgroundColor"] == "rgb(255, 255, 255)"
+    assert nodes[0].page_background == "rgb(241, 245, 249)"
+
+
+def test_parse_js_nodes_defaults_without_styles() -> None:
+    raw = [{"x": 0, "y": 0, "width": 100, "height": 100, "data": {"data-pbi": "card"}}]
+    nodes = _parse_js_nodes(raw)
+    assert nodes[0].styles == {}
+    assert nodes[0].page_background == ""
+
+
+def test_safe_filename() -> None:
+    assert _safe_filename("Overview") == "Overview"
+    # NOTE: brief's expected literal ("P_a_g_e __1_", 12 chars) is unreachable from
+    # an 11-char input via a 1-char-in/1-char-out regex substitution; corrected to
+    # match the verbatim `re.sub(r'[^\w\- ]', "_", name)` implementation's actual output.
+    assert _safe_filename('P/a:g*e "1"') == "P_a_g_e _1_"
+
+
+def test_extract_result_shape() -> None:
+    r = ExtractResult(nodes=[], previews=[], warnings=[])
+    assert r.nodes == [] and r.previews == [] and r.warnings == []

@@ -122,7 +122,8 @@ async def emit_pbir(
         html_file.write_text(html, encoding="utf-8")
         shutil.copy(_DASHBOARD_CSS, tmp_path / "dashboard.css")
 
-        nodes = await extract_visuals(html_file)
+        extract_result = await extract_visuals(html_file)
+    nodes = extract_result.nodes
 
     # Bookmark nodes are metadata, not rendered visuals — exclude them from
     # build_visual_json. Field-param nodes DO render a slicer, so keep those.
