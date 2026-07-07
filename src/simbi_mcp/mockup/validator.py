@@ -113,6 +113,10 @@ def validate_mockup(html: str, schema: ModelSchema) -> list[str]:
     all_warnings: list[str] = []
     for node in collector.nodes:
         all_warnings.extend(_validate_node(node, schema))
+
+    # Cross-visual checks: duplicate ids, bookmark/button references
+    _check_cross_references(collector.nodes)
+
     return all_warnings
 
 
@@ -143,6 +147,9 @@ def _validate_node(attrs: dict[str, str], schema: ModelSchema) -> list[str]:
 
     for attr in MEASURE_ATTRS:
         if attr in attrs:
+            # Bookmarks use data-pbi-target/visible/hidden as visual ids, not measures
+            if vtype is VisualType.BOOKMARK and attr in ("data-pbi-target", "data-pbi-visible", "data-pbi-hidden"):
+                continue
             _check_measure(attrs[attr], schema, attr, vtype)
 
     for attr in COLUMN_REF_ATTRS:
@@ -245,3 +252,54 @@ def _check_column_ref(ref: str, schema: ModelSchema, attr: str, vtype: VisualTyp
             f"{col_name!r} in table {table_name!r}. "
             f"Available columns in {table_name}: {available}"
         )
+
+
+def _split_ids(value: str) -> list[str]:
+    return [t.strip() for t in value.split(",") if t.strip()]
+
+
+def _check_cross_references(nodes: list[dict[str, str]]) -> None:
+    """Cross-visual checks: data-pbi-id uniqueness, bookmark id refs, button
+    bookmark refs. Mirrors what the emitter resolves later so failures surface
+    at lint time, not emit time."""
+    ids = [n["data-pbi-id"] for n in nodes if n.get("data-pbi-id")]
+    dupes = sorted({i for i in ids if ids.count(i) > 1})
+    if dupes:
+        raise ValidationError(
+            f"Duplicate data-pbi-id value(s): {dupes}. Each visual id must be unique."
+        )
+    id_set = set(ids)
+
+    bookmark_names = [
+        n.get("data-pbi-name", "") for n in nodes if n.get("data-pbi") == "bookmark"
+    ]
+    dup_names = sorted({b for b in bookmark_names if bookmark_names.count(b) > 1})
+    if dup_names:
+        raise ValidationError(f"Duplicate bookmark data-pbi-name value(s): {dup_names}.")
+    name_set = set(bookmark_names)
+
+    for n in nodes:
+        if n.get("data-pbi") == "bookmark":
+            for attr in ("data-pbi-visible", "data-pbi-hidden", "data-pbi-target"):
+                value = n.get(attr, "")
+                if attr == "data-pbi-target" and value.strip() == "all":
+                    continue
+                for token in _split_ids(value):
+                    if token not in id_set:
+                        raise ValidationError(
+                            f"Bookmark {n.get('data-pbi-name', '?')!r} ({attr}) references "
+                            f"unknown visual id {token!r}. Known ids: {sorted(id_set)}. "
+                            f"Give the target visual a data-pbi-id attribute."
+                        )
+        elif n.get("data-pbi") == "button" and n.get("data-pbi-action") == "bookmark":
+            bm = n.get("data-pbi-bookmark", "").strip()
+            if not bm:
+                raise ValidationError(
+                    'Button with data-pbi-action="bookmark" is missing data-pbi-bookmark. '
+                    f"Known bookmarks: {sorted(name_set)}"
+                )
+            if bm not in name_set:
+                raise ValidationError(
+                    f"Button references unknown bookmark {bm!r}. "
+                    f"Known bookmarks: {sorted(name_set)}"
+                )
