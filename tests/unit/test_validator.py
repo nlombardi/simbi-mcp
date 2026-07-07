@@ -338,3 +338,61 @@ def test_non_data_pbi_attrs_ignored(schema) -> None:
         'data-pbi="card" data-pbi-measure="Total Revenue"></div>'
     )
     validate_mockup(html, schema)  # must not raise
+
+
+# ---------- Cross-reference checks (bookmarks and buttons) ----------
+
+
+def test_bookmark_unknown_visual_id_is_error(schema) -> None:
+    html = (
+        '<div data-pbi="lineChart" data-pbi-id="chartLine" '
+        'data-pbi-axis="sales[OrderDate]" data-pbi-values="Total Revenue"></div>'
+        '<div data-pbi="bookmark" data-pbi-name="View: Bar" '
+        'data-pbi-visible="chartBar" data-pbi-hidden="chartLine"></div>'
+    )
+    with pytest.raises(ValidationError, match="chartBar"):
+        validate_mockup(html, schema)
+
+
+def test_bookmark_known_ids_pass(schema) -> None:
+    html = (
+        '<div data-pbi="lineChart" data-pbi-id="chartLine" '
+        'data-pbi-axis="sales[OrderDate]" data-pbi-values="Total Revenue"></div>'
+        '<div data-pbi="barChart" data-pbi-id="chartBar" data-pbi-hidden="true" '
+        'data-pbi-axis="sales[Region]" data-pbi-values="Total Revenue"></div>'
+        '<div data-pbi="bookmark" data-pbi-name="View: Bar" data-pbi-captures="visibility" '
+        'data-pbi-visible="chartBar" data-pbi-hidden="chartLine"></div>'
+    )
+    validate_mockup(html, schema)  # must not raise
+
+
+def test_bookmark_target_all_is_skipped(schema) -> None:
+    html = (
+        '<div data-pbi="card" data-pbi-measure="Total Revenue"></div>'
+        '<div data-pbi="bookmark" data-pbi-name="B" data-pbi-target="all"></div>'
+    )
+    validate_mockup(html, schema)  # must not raise
+
+
+def test_duplicate_visual_id_is_error(schema) -> None:
+    html = (
+        '<div data-pbi="card" data-pbi-id="dup" data-pbi-measure="Total Revenue"></div>'
+        '<div data-pbi="card" data-pbi-id="dup" data-pbi-measure="Order Count"></div>'
+    )
+    with pytest.raises(ValidationError, match="dup"):
+        validate_mockup(html, schema)
+
+
+def test_button_unknown_bookmark_is_error(schema) -> None:
+    html = (
+        '<div data-pbi="bookmark" data-pbi-name="View: Bar"></div>'
+        '<div data-pbi="button" data-pbi-action="bookmark" data-pbi-bookmark="View: Line"></div>'
+    )
+    with pytest.raises(ValidationError, match="View: Bar"):
+        validate_mockup(html, schema)
+
+
+def test_button_bookmark_action_requires_bookmark_attr(schema) -> None:
+    html = '<div data-pbi="button" data-pbi-action="bookmark"></div>'
+    with pytest.raises(ValidationError, match="data-pbi-bookmark"):
+        validate_mockup(html, schema)
