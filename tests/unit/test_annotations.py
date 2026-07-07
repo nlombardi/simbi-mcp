@@ -159,3 +159,32 @@ def test_every_type_has_an_example() -> None:
 def test_chart_examples_show_data_pbi_id() -> None:
     assert "data-pbi-id" in EXAMPLES[VisualType.LINE_CHART]
     assert "data-pbi-id" in EXAMPLES[VisualType.BAR_CHART]
+
+
+def test_generated_spec_contains_every_type_and_attr() -> None:
+    for vtype, spec in VISUAL_ATTRS.items():
+        assert f"\n  {vtype.value}\n" in "\n" + ANNOTATION_SPEC_TEXT, f"missing type {vtype.value}"
+        for attr in {**spec["required"], **spec["optional"]}:
+            assert attr in ANNOTATION_SPEC_TEXT, f"missing attr {attr} ({vtype.value})"
+
+
+def test_generated_spec_contains_universal_section() -> None:
+    assert "UNIVERSAL ATTRIBUTES" in ANNOTATION_SPEC_TEXT
+    assert "data-pbi-id" in ANNOTATION_SPEC_TEXT
+    assert "data-pbi-hidden" in ANNOTATION_SPEC_TEXT
+
+
+def test_generated_spec_contains_styling_contract() -> None:
+    assert "STYLING CONTRACT" in ANNOTATION_SPEC_TEXT
+    assert "box-shadow" in ANNOTATION_SPEC_TEXT
+    assert "background-color" in ANNOTATION_SPEC_TEXT
+
+
+def test_generated_spec_contains_examples_and_notes() -> None:
+    assert EXAMPLES[VisualType.CARD] in ANNOTATION_SPEC_TEXT
+    assert "HORIZONTAL" in ANNOTATION_SPEC_TEXT  # barChart note made it in
+
+
+def test_generated_spec_marks_required_vs_optional() -> None:
+    assert "(required)" in ANNOTATION_SPEC_TEXT
+    assert "(optional)" in ANNOTATION_SPEC_TEXT
