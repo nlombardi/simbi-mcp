@@ -6,6 +6,7 @@ against real Power BI samples in resources/PowerBI_Files/.
 """
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 
@@ -88,3 +89,158 @@ def parse_shadow_layer(layer: str) -> ShadowLayer | None:
     blur = lengths[2] if len(lengths) > 2 else 0.0
     spread = lengths[3] if len(lengths) > 3 else 0.0
     return ShadowLayer(color_hex=color_hex, alpha=alpha, x=x, y=y, blur=blur, spread=spread)
+
+
+def literal(value: str) -> dict:
+    return {"expr": {"Literal": {"Value": value}}}
+
+
+def solid(hex_: str) -> dict:
+    return {"solid": {"color": literal(f"'{hex_}'")}}
+
+
+def _transparency(alpha: float) -> str:
+    return f"{round((1 - alpha) * 100)}D"
+
+
+def container_objects_from_styles(
+    styles: dict[str, str],
+) -> tuple[dict, list[str], list[str]]:
+    """Map computed CSS to visualContainerObjects background/border/dropShadow.
+
+    Returns (fragment, honored-notes, warnings). Emits nothing for defaults
+    (transparent background, no border, no shadow) to keep visual.json lean.
+    """
+    out: dict = {}
+    honored: list[str] = []
+    warnings: list[str] = []
+
+    bg = parse_css_color(styles.get("backgroundColor", ""))
+    bg_hex: str | None = None
+    if bg is not None and bg[1] > 0:
+        bg_hex, bg_alpha = bg
+        out["background"] = [{
+            "properties": {
+                "show": literal("true"),
+                "color": solid(bg_hex),
+                "transparency": literal(_transparency(bg_alpha)),
+            }
+        }]
+        honored.append(f"background {bg_hex}")
+
+    width = parse_px(styles.get("borderWidth", ""))
+    border_style = styles.get("borderStyle", "none").strip().lower()
+    border_color = parse_css_color(styles.get("borderColor", ""))
+    radius = parse_px(styles.get("borderRadius", ""))
+    has_border = (
+        border_style not in ("", "none", "hidden")
+        and width > 0
+        and border_color is not None
+        and border_color[1] > 0
+    )
+    if has_border or radius > 0:
+        props: dict = {"show": literal("true")}
+        if has_border:
+            assert border_color is not None
+            props["color"] = solid(border_color[0])
+            props["width"] = literal(f"{max(1, round(width))}D")
+            honored.append(f"border {border_color[0]}")
+        else:
+            # Power BI only rounds corners when the border is on. Emit a 1px
+            # border matching the background so corners round invisibly.
+            props["color"] = solid(bg_hex or "#FFFFFF")
+            props["width"] = literal("1D")
+        if radius > 0:
+            props["radius"] = literal(f"{round(radius)}D")
+            honored.append(f"radius {round(radius)}")
+        out["border"] = [{"properties": props}]
+
+    shadow_css = styles.get("boxShadow", "").strip()
+    if shadow_css and shadow_css != "none":
+        layers = split_shadow_layers(shadow_css)
+        layer = parse_shadow_layer(layers[0]) if layers else None
+        if layer is None:
+            warnings.append(f"box-shadow {shadow_css!r} could not be parsed; skipped")
+        else:
+            angle = round(math.degrees(math.atan2(layer.y, layer.x))) % 360
+            out["dropShadow"] = [{
+                "properties": {
+                    "show": literal("true"),
+                    "color": solid(layer.color_hex),
+                    "preset": literal("'Custom'"),
+                    "angle": literal(f"{angle}D"),
+                    "shadowDistance": literal(f"{round(math.hypot(layer.x, layer.y))}D"),
+                    "shadowBlur": literal(f"{round(layer.blur)}D"),
+                    "shadowSpread": literal(f"{round(layer.spread)}D"),
+                    "transparency": literal(_transparency(layer.alpha)),
+                }
+            }]
+            honored.append("dropShadow")
+            if len(layers) > 1:
+                warnings.append(
+                    f"box-shadow has {len(layers)} layers; only the first transfers"
+                )
+    return out, honored, warnings
+
+
+def shape_objects_from_styles(
+    styles: dict[str, str], attrs: dict[str, str]
+) -> tuple[dict, list[str], list[str]]:
+    """Map CSS/attrs to shape GEOMETRY objects (fill/outline/roundEdge).
+
+    data-pbi-fill / data-pbi-stroke beat computed CSS. Structure verified
+    against resources/PowerBI_Files/Card with Context (fill + outline with
+    selector id=default, roundEdge L-suffixed).
+    """
+    out: dict = {}
+    honored: list[str] = []
+    warnings: list[str] = []
+
+    fill_source = attrs.get("data-pbi-fill", "").strip() or styles.get("backgroundColor", "")
+    fill = parse_css_color(fill_source)
+    if fill_source and fill is None:
+        warnings.append(f"shape fill {fill_source!r} could not be parsed; skipped")
+    elif fill is not None and fill[1] > 0:
+        out["fill"] = [{
+            "properties": {"fillColor": solid(fill[0])},
+            "selector": {"id": "default"},
+        }]
+        honored.append(f"fill {fill[0]}")
+
+    border_style = styles.get("borderStyle", "none").strip().lower()
+    css_stroke_visible = (
+        border_style not in ("", "none", "hidden")
+        and parse_px(styles.get("borderWidth", "")) > 0
+    )
+    stroke_source = attrs.get("data-pbi-stroke", "").strip() or (
+        styles.get("borderColor", "") if css_stroke_visible else ""
+    )
+    stroke = parse_css_color(stroke_source)
+    if stroke_source and stroke is None:
+        warnings.append(f"shape stroke {stroke_source!r} could not be parsed; skipped")
+    elif stroke is not None and stroke[1] > 0:
+        out["outline"] = [
+            {"properties": {"show": literal("true")}},
+            {"properties": {"lineColor": solid(stroke[0])}, "selector": {"id": "default"}},
+        ]
+        honored.append(f"stroke {stroke[0]}")
+
+    radius = parse_px(styles.get("borderRadius", ""))
+    if radius > 0:
+        out["shape"] = [{"properties": {"roundEdge": literal(f"{round(radius)}L")}}]
+        honored.append(f"roundEdge {round(radius)}")
+    return out, honored, warnings
+
+
+def page_background_card(css_color: str) -> list[dict] | None:
+    """Build a page.json objects.background card from a CSS color, or None."""
+    parsed = parse_css_color(css_color)
+    if parsed is None or parsed[1] == 0:
+        return None
+    hex_, alpha = parsed
+    return [{
+        "properties": {
+            "color": solid(hex_),
+            "transparency": literal(_transparency(alpha)),
+        }
+    }]
