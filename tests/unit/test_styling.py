@@ -61,3 +61,24 @@ def test_parse_shadow_layer_no_spread() -> None:
 
 def test_parse_shadow_layer_inset_returns_none() -> None:
     assert parse_shadow_layer("rgba(0, 0, 0, 0.1) 0px 1px 3px 0px inset") is None
+
+
+def test_parse_px_malformed_numeral_returns_zero() -> None:
+    assert parse_px("1.2.3px") == 0.0
+    assert parse_px("..px") == 0.0
+    assert parse_px("-.px") == 0.0
+
+
+def test_parse_css_color_malformed_alpha_returns_none() -> None:
+    assert parse_css_color("rgba(0, 0, 0, 1.2.3)") is None
+
+
+def test_parse_shadow_layer_malformed_length_returns_none() -> None:
+    # Malformed first token causes findall to extract fewer than 2 required lengths
+    assert parse_shadow_layer("rgba(0, 0, 0, 0.1) 1.2.3px") is None
+
+
+def test_parse_shadow_layer_negative_offset_and_spread() -> None:
+    layer = parse_shadow_layer("rgba(0, 0, 0, 0.2) 0px 4px 6px -1px")
+    assert layer is not None
+    assert (layer.x, layer.y, layer.blur, layer.spread) == (0.0, 4.0, 6.0, -1.0)

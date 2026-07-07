@@ -10,11 +10,11 @@ import re
 from dataclasses import dataclass
 
 _RGB_RE = re.compile(
-    r"rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+)\s*)?\)"
+    r"rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*(-?\d+(?:\.\d+)?)\s*)?\)"
 )
 _HEX_RE = re.compile(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
-_PX_RE = re.compile(r"^(-?[\d.]+)px$")
-_PX_TOKEN_RE = re.compile(r"(-?[\d.]+)px")
+_PX_RE = re.compile(r"^(-?\d+(?:\.\d+)?)px$")
+_PX_TOKEN_RE = re.compile(r"(-?\d+(?:\.\d+)?)px")
 
 
 def parse_css_color(value: str) -> tuple[str, float] | None:
