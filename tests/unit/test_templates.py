@@ -866,3 +866,86 @@ def test_text_dynamic_title_emits_measure_expr() -> None:
     expr = runs[0]["expr"]["Measure"]
     assert expr["Property"] == "Chart Title Label"
     assert expr["Expression"]["SourceRef"]["Entity"] == "sales"
+
+
+from simbi_mcp.pbir.styling import literal, solid
+
+_CARD_STYLES = {
+    "backgroundColor": "rgb(255, 255, 255)",
+    "borderWidth": "0px",
+    "borderStyle": "none",
+    "borderColor": "rgb(0, 0, 0)",
+    "borderRadius": "12px",
+    "boxShadow": "rgba(0, 0, 0, 0.1) 0px 1px 3px 0px",
+}
+
+
+def test_card_gets_container_styling(schema) -> None:
+    node = VisualNode(
+        x=0, y=0, width=200, height=100,
+        attrs={"data-pbi": "card", "data-pbi-measure": "Total Revenue"},
+        styles=_CARD_STYLES,
+    )
+    container = build_visual_json(node, z_order=0, schema=schema)
+    vco = container["visual"]["visualContainerObjects"]
+    assert vco["background"][0]["properties"]["color"] == solid("#FFFFFF")
+    assert vco["border"][0]["properties"]["radius"] == literal("12D")
+    assert vco["dropShadow"][0]["properties"]["preset"] == literal("'Custom'")
+    assert container["simbiStyling"]["honored"]
+
+
+def test_unstyled_card_emits_no_container_styling(schema) -> None:
+    node = VisualNode(
+        x=0, y=0, width=200, height=100,
+        attrs={"data-pbi": "card", "data-pbi-measure": "Total Revenue"},
+        styles={"backgroundColor": "rgba(0, 0, 0, 0)", "boxShadow": "none"},
+    )
+    container = build_visual_json(node, z_order=0, schema=schema)
+    vco = container["visual"].get("visualContainerObjects", {})
+    assert "background" not in vco and "border" not in vco and "dropShadow" not in vco
+    assert "simbiStyling" not in container
+
+
+def test_chart_styling_does_not_clobber_title_off(schema) -> None:
+    node = VisualNode(
+        x=0, y=0, width=300, height=200,
+        attrs={
+            "data-pbi": "columnChart",
+            "data-pbi-axis": "sales[Region]",
+            "data-pbi-values": "Total Revenue",
+        },
+        styles=_CARD_STYLES,
+    )
+    container = build_visual_json(node, z_order=0, schema=schema)
+    vco = container["visual"]["visualContainerObjects"]
+    assert vco["title"][0]["properties"]["show"] == literal("false")
+    assert "background" in vco
+
+
+def test_shape_gets_geometry_styling_not_container(schema) -> None:
+    node = VisualNode(
+        x=0, y=0, width=300, height=80,
+        attrs={"data-pbi": "shape"},
+        styles={
+            "backgroundColor": "rgb(30, 58, 138)",
+            "borderWidth": "0px", "borderStyle": "none",
+            "borderColor": "rgb(0, 0, 0)", "borderRadius": "8px",
+            "boxShadow": "none",
+        },
+    )
+    container = build_visual_json(node, z_order=0, schema=schema)
+    objs = container["visual"]["objects"]
+    assert objs["fill"][0]["properties"]["fillColor"] == solid("#1E3A8A")
+    assert objs["shape"][0]["properties"]["tileShape"] == literal("'rectangle'")
+    assert objs["shape"][0]["properties"]["roundEdge"] == literal("8L")
+    assert "visualContainerObjects" not in container["visual"]
+
+
+def test_shape_fill_attr_beats_css(schema) -> None:
+    node = VisualNode(
+        x=0, y=0, width=300, height=80,
+        attrs={"data-pbi": "shape", "data-pbi-fill": "#FF0000"},
+        styles={"backgroundColor": "rgb(30, 58, 138)"},
+    )
+    container = build_visual_json(node, z_order=0, schema=schema)
+    assert container["visual"]["objects"]["fill"][0]["properties"]["fillColor"] == solid("#FF0000")

@@ -162,7 +162,7 @@ def write_report(
                 raise ValueError(
                     f"visual dict at index {i} is missing required key 'name'"
                 ) from exc
-            clean = {k: v for k, v in visual.items() if k not in ("simbiId", "simbiButtonAction")}
+            clean = {k: v for k, v in visual.items() if k not in ("simbiId", "simbiButtonAction", "simbiStyling")}
             _write_json(
                 report_dir
                 / "definition"
