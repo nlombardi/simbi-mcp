@@ -396,3 +396,40 @@ def test_button_bookmark_action_requires_bookmark_attr(schema) -> None:
     html = '<div data-pbi="button" data-pbi-action="bookmark"></div>'
     with pytest.raises(ValidationError, match="data-pbi-bookmark"):
         validate_mockup(html, schema)
+
+
+# ---------- Bar chart time-axis heuristic warning ----------
+
+
+def _schema_with_year() -> ModelSchema:
+    return ModelSchema(
+        tables=[ModelTable(name="gdp", columns=[
+            ModelColumn(name="Year", data_type="int64"),
+            ModelColumn(name="Country"),
+            ModelColumn(name="AsOf", data_type="dateTime"),
+        ])],
+        measures=[ModelMeasure(name="GDP", table="gdp", expression="SUM(gdp[Value])", return_type="number")],
+        relationships=[],
+    )
+
+
+def test_barchart_year_axis_warns() -> None:
+    html = '<div data-pbi="barChart" data-pbi-axis="gdp[Year]" data-pbi-values="GDP"></div>'
+    warnings = validate_mockup(html, _schema_with_year())
+    assert any("HORIZONTAL" in w and "columnChart" in w for w in warnings)
+
+
+def test_barchart_datetime_axis_warns() -> None:
+    html = '<div data-pbi="barChart" data-pbi-axis="gdp[AsOf]" data-pbi-values="GDP"></div>'
+    warnings = validate_mockup(html, _schema_with_year())
+    assert any("columnChart" in w for w in warnings)
+
+
+def test_barchart_category_axis_does_not_warn() -> None:
+    html = '<div data-pbi="barChart" data-pbi-axis="gdp[Country]" data-pbi-values="GDP"></div>'
+    assert validate_mockup(html, _schema_with_year()) == []
+
+
+def test_columnchart_year_axis_does_not_warn() -> None:
+    html = '<div data-pbi="columnChart" data-pbi-axis="gdp[Year]" data-pbi-values="GDP"></div>'
+    assert validate_mockup(html, _schema_with_year()) == []
