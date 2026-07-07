@@ -11,6 +11,7 @@ from typing import Any
 
 from simbi_mcp.mockup.annotations import VisualType
 from simbi_mcp.pbir.extractor import VisualNode
+from simbi_mcp.pbir.styling import container_objects_from_styles, shape_objects_from_styles
 from simbi_mcp.types import ModelSchema
 
 _COL_REF_RE = re.compile(r"^(.+)\[(.+)\]$")
@@ -127,6 +128,23 @@ def build_visual_json(
         visual.setdefault("visualContainerObjects", {})["title"] = [
             {"properties": {"show": {"expr": {"Literal": {"Value": "false"}}}}}
         ]
+    # WYSIWYG styling: computed CSS transfers to PBIR. Shapes style their
+    # geometry (fill/outline/roundEdge); everything else styles the container.
+    if vtype is VisualType.SHAPE:
+        style_objs, style_honored, style_warnings = shape_objects_from_styles(
+            node.styles, node.attrs
+        )
+        if style_objs:
+            objs = visual.setdefault("objects", {})
+            for key, cards in style_objs.items():
+                if key == "shape" and "shape" in objs:
+                    objs["shape"][0]["properties"].update(cards[0]["properties"])
+                else:
+                    objs[key] = cards
+    else:
+        style_vco, style_honored, style_warnings = container_objects_from_styles(node.styles)
+        if style_vco:
+            visual.setdefault("visualContainerObjects", {}).update(style_vco)
     # Floor interactive-visual heights so short mockup boxes don't clip in
     # Power BI Desktop. Only raises sub-minimum heights; never shrinks.
     # `between` slicers carry a slider that needs more vertical room than a
@@ -153,6 +171,22 @@ def build_visual_json(
         # second pass. Stripped from the final visual.json by the writer (it is
         # not a PBIR property). Kept separate from the random `name` guid.
         container["simbiId"] = node.attrs["data-pbi-id"]
+    if style_honored or style_warnings:
+        label = (
+            node.attrs.get("data-pbi-id")
+            or node.attrs.get("data-pbi-measure")
+            or node.attrs.get("data-pbi-axis")
+            or node.attrs.get("data-pbi-field")
+            or node.attrs.get("data-pbi-text")
+            or ""
+        )
+        # Stripped by the writer like simbiId; read by the emitter for the
+        # styling-transferred report.
+        container["simbiStyling"] = {
+            "label": label,
+            "honored": style_honored,
+            "warnings": style_warnings,
+        }
     if node.attrs.get("data-pbi-hidden", "").lower() == "true":
         # Power BI's verified top-level container flag for a visual hidden on page
         # load. Applies to ANY visual type (chrome and query-bearing) since it
