@@ -1,8 +1,9 @@
 """SimBI MCP server — exposes Phase 1-3 pipelines as MCP tools.
 
 Tools (typical call order):
-  parse_schema   TMDL str → ModelSchema JSON
-  emit_report    HTML + schema JSON → multi-line emission report (PBIR folder path + warnings)
+  write_semantic_model   TMDL str + pbip_path → persists tables/measures (Path 1 only)
+  parse_schema           TMDL str → ModelSchema JSON
+  emit_report            HTML + schema JSON → multi-line emission report (PBIR folder path + warnings)
 
 Resources:
   simbi://annotation-vocabulary   data-pbi-* spec + CSS class catalog
@@ -70,20 +71,30 @@ mcp: FastMCP = FastMCP(
         "       - Measure definitions with DAX expressions and formatStrings\n"
         "         (e.g. measure 'Total Revenue' = SUM(sales[Revenue]))\n"
         "       - A partition block pointing at the CSV/Excel file path\n"
-        "     Do NOT call the Power BI MCP. Write the TMDL as inline text.\n"
+        "     Do NOT call the Power BI MCP, and do NOT write the .tmdl file(s)\n"
+        "     yourself with a file-editing tool — hand-written TMDL routinely\n"
+        "     gets indentation wrong (TMDL requires literal TAB characters; a\n"
+        "     measure or column not nested one tab under its table fails to\n"
+        "     open in Power BI Desktop with a cryptic 'Invalid indentation'\n"
+        "     error). Keep the TMDL as an in-memory string and pass it to\n"
+        "     SimBI.write_semantic_model in step 5 instead.\n"
         "  4. Call SimBI.lint_measures with the TMDL. Fix every ERROR; review\n"
         "     each WARNING and either fix it or confirm it is a deliberate\n"
         "     choice. A clean lint does NOT prove the DAX is correct — it\n"
         "     proves the known footguns are absent.\n"
-        "  5. Call SimBI.parse_schema with the TMDL text you wrote in step 3.\n"
-        "  6. Call SimBI.get_vocabulary, then generate annotated HTML using the schema.\n"
+        "  5. Call SimBI.write_semantic_model with the TMDL text and pbip_path\n"
+        "     to persist it — repairs indentation/reserved-name mistakes and\n"
+        "     rejects load-blocking errors BEFORE anything reaches disk,\n"
+        "     instead of failing later in Power BI Desktop.\n"
+        "  6. Call SimBI.parse_schema with the same TMDL text you wrote in step 3.\n"
+        "  7. Call SimBI.get_vocabulary, then generate annotated HTML using the schema.\n"
         "     Every visual element MUST have non-zero CSS dimensions — use the\n"
         "     dashboard.css classes (db-page, db-grid, db-card, db-chart-area).\n"
-        "  7. Call SimBI.validate_mockup_html to lint the HTML.\n"
-        "  8. Call SimBI.emit_report with pbip_path pointing to the .pbip.\n"
-        "     emit_report automatically writes the measures from step 3 into the\n"
-        "     SemanticModel so they appear in Power BI Desktop on open.\n"
-        "  9. Open the .pbip fresh in Power BI Desktop. Visuals render immediately\n"
+        "  8. Call SimBI.validate_mockup_html to lint the HTML.\n"
+        "  9. Call SimBI.emit_report with pbip_path pointing to the .pbip.\n"
+        "     emit_report writes any measures still missing from the\n"
+        "     SemanticModel (idempotent — step 5 already wrote most of it).\n"
+        " 10. Open the .pbip fresh in Power BI Desktop. Visuals render immediately\n"
         "     but show empty data — use Home → Transform data to connect the CSV.\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         "PATH 2 — Microsoft Power BI MCP + SimBI\n"
@@ -120,11 +131,13 @@ mcp: FastMCP = FastMCP(
         "to create measures. Switch to PATH 1 immediately.\n\n"
         "SimBI does NOT need a live Power BI connection to create measures,\n"
         "tables, or relationships. Everything is file-based:\n"
-        "  - Write the full TMDL (tables + measure blocks + partitions) as inline\n"
-        "    text and pass it to SimBI.parse_schema.\n"
-        "  - SimBI.emit_report then writes those measures into the .SemanticModel\n"
-        "    on disk via patch_semantic_model_measures — no XMLA, no live session.\n"
-        "  - The user opens the .pbip fresh and the measures are already there.\n\n"
+        "  - Write the full TMDL (tables + measure blocks + partitions) as an\n"
+        "    in-memory string — do not write .tmdl files yourself.\n"
+        "  - Call SimBI.write_semantic_model with that TMDL and pbip_path to\n"
+        "    persist it — normalizes reserved names, repairs indentation and\n"
+        "    partition mistakes. No XMLA, no live session.\n"
+        "  - Then SimBI.parse_schema (same text) and SimBI.emit_report as usual.\n"
+        "  - The user opens the .pbip fresh and the tables/measures are already there.\n\n"
         "Reach for Power BI MCP only when you have already confirmed a live\n"
         "connection exists. The presence of the tool in the catalog is NOT proof\n"
         "of a connection.\n\n"
