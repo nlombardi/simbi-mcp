@@ -174,6 +174,16 @@ async def test_get_vocabulary_tool_returns_full_spec() -> None:
     assert "waterfallChart" in text  # a type the old docstring never mentioned
 
 
+async def test_get_theme_schema_tool_returns_schema() -> None:
+    _, result = await mcp.call_tool("get_theme_schema", {})
+    text = result["result"]
+    assert "THEME SCHEMA" in text
+    assert "CY25SU10" in text
+    assert "dataColors" in text
+    assert "visualStyles" in text
+    assert "get_vocabulary" in text
+
+
 async def test_all_tool_descriptions_within_client_budget() -> None:
     tools = await mcp.list_tools()
     assert tools, "no tools registered"

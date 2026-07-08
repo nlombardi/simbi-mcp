@@ -3,6 +3,7 @@
 Tools (typical call order):
   write_semantic_model   TMDL str + pbip_path → persists tables/measures (Path 1 only)
   parse_schema           TMDL str → ModelSchema JSON
+  get_theme_schema       () → theme_path JSON schema (call before writing a custom theme)
   emit_report            HTML + schema JSON → multi-line emission report (PBIR folder path + warnings)
 
 Resources:
@@ -25,6 +26,7 @@ from simbi_mcp.pbir.emitter import EmitResult, emit_pbir
 from simbi_mcp.pbir.model_writer import write_semantic_model as _write_semantic_model
 from simbi_mcp.pbir.reserved_names import sanitize_schema, sanitize_semantic_model_dir
 from simbi_mcp.pbir.semantic_patcher import patch_semantic_model_measures
+from simbi_mcp.pbir.theme import build_theme_schema_text
 from simbi_mcp.semantic.schema_reader import parse_tmdl_schema
 from simbi_mcp.types import ModelSchema
 
@@ -181,7 +183,8 @@ mcp: FastMCP = FastMCP(
         "  COLOUR\n"
         "    - SimBI ships a theme: Microsoft CY25SU10 palette + opinionated\n"
         "      visualStyles (gridlines off, no visual borders, lean cards).\n"
-        "      You generally do NOT need to specify colours.\n"
+        "      You generally do NOT need to specify colours. Before writing a\n"
+        "      custom theme_path file for emit_report, call SimBI.get_theme_schema.\n"
         "    - Semantic colour is RESERVED: green = good, red = bad,\n"
         "      grey = neutral/inactive. Never reassign these to categorical\n"
         "      data (a red bar for APAC makes APAC look like an alert).\n"
@@ -394,6 +397,20 @@ def get_vocabulary() -> str:
     fill/outline/roundEdge), and the CSS class catalog for mockup layout.
     """
     return ANNOTATION_SPEC_TEXT + "\n" + CSS_CLASS_CATALOG
+
+
+@mcp.tool()
+def get_theme_schema() -> str:
+    """Report-wide theme JSON schema — call before writing a custom theme_path file.
+
+    Returns SimBI's three-tier theme resolution order (Microsoft CY25SU10 →
+    SimBI opinionated visualStyles → your optional theme_path, deep-merged),
+    the actual default dataColors/textClasses/visualStyles SimBI already sets,
+    and how this report-wide theme relates to the per-visual WYSIWYG styling
+    contract from get_vocabulary (explicit data-pbi-fill/data-pbi-stroke or an
+    element's own CSS override the theme for that one visual only).
+    """
+    return build_theme_schema_text()
 
 
 @mcp.tool()
