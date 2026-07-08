@@ -40,6 +40,11 @@ _SALES_SCHEMA = ModelSchema(
 )
 
 
+def _report_dir_from_result(text: str) -> Path:
+    """emit_report now returns a multi-line report; the .Report path is the first line."""
+    return Path(text.splitlines()[0].removeprefix(".Report written: "))
+
+
 def _seed_pbip(tmp_path: Path, name: str) -> Path:
     """Simulate the .pbip + .SemanticModel that Power BI Desktop / MCP would have created."""
     pbip = tmp_path / f"{name}.pbip"
@@ -64,7 +69,7 @@ async def test_emit_report_returns_report_dir_path(tmp_path: Path) -> None:
             "pbip_path": str(pbip),
         },
     )
-    report_dir = Path(result["result"])
+    report_dir = _report_dir_from_result(result["result"])
     assert report_dir == tmp_path / "TestDashboard.Report"
     assert report_dir.is_dir()
 
@@ -138,7 +143,7 @@ async def test_emit_report_accepts_folder_and_finds_pbip(tmp_path: Path) -> None
             "pbip_path": str(tmp_path),  # folder, not file
         },
     )
-    assert Path(result["result"]) == tmp_path / "TestDashboard.Report"
+    assert _report_dir_from_result(result["result"]) == tmp_path / "TestDashboard.Report"
 
 
 async def test_emit_report_rejects_ambiguous_folder(tmp_path: Path) -> None:

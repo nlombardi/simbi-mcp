@@ -2,7 +2,7 @@
 
 Tools (typical call order):
   parse_schema   TMDL str → ModelSchema JSON
-  emit_report    HTML + schema JSON → PBIR folder path
+  emit_report    HTML + schema JSON → multi-line emission report (PBIR folder path + warnings)
 
 Resources:
   simbi://annotation-vocabulary   data-pbi-* spec + CSS class catalog
@@ -20,7 +20,7 @@ from simbi_mcp.mockup.validator import (
     count_annotated_visuals,
     validate_mockup,
 )
-from simbi_mcp.pbir.emitter import emit_pbir
+from simbi_mcp.pbir.emitter import EmitResult, emit_pbir
 from simbi_mcp.pbir.reserved_names import sanitize_schema, sanitize_semantic_model_dir
 from simbi_mcp.pbir.semantic_patcher import patch_semantic_model_measures
 from simbi_mcp.semantic.schema_reader import parse_tmdl_schema
@@ -238,6 +238,21 @@ def _resolve_pbip(pbip_path: str) -> Path:
     )
 
 
+def _format_emit_result(result: EmitResult, validator_warnings: list[str]) -> str:
+    lines = [f".Report written: {result.report_dir}"]
+    if result.previews:
+        lines.append("Preview (HTML mockup render, NOT a Power BI render):")
+        lines.extend(f"  {p}" for p in result.previews)
+    if result.styling_notes:
+        lines.append("Styling transferred:")
+        lines.extend(f"  {n}" for n in result.styling_notes)
+    all_warnings = list(validator_warnings) + list(result.warnings)
+    if all_warnings:
+        lines.append("Warnings:")
+        lines.extend(f"  - {w}" for w in all_warnings)
+    return "\n".join(lines)
+
+
 @mcp.resource("simbi://annotation-vocabulary")
 def annotation_vocabulary() -> str:
     """HTML annotation vocabulary and CSS class catalog for dashboard mockups."""
@@ -399,7 +414,12 @@ async def emit_report(
             ONTO that default — pass only `dataColors` to rebrand without
             losing SimBI's visualStyles opinions.
 
-    Returns: absolute path to the .Report folder that was written.
+    Returns: a multi-line human-readable report. The FIRST line is always
+      ".Report written: <absolute path to the .Report folder>". Subsequent
+      sections (each optional, present only when non-empty) list HTML mockup
+      preview screenshots (NOT a Power BI render — a rough visual sanity
+      check), WYSIWYG CSS styling transferred onto visuals, and warnings from
+      both HTML validation and emission.
 
     PREREQUISITE — Power BI Desktop MUST be closed before calling this tool:
       Power BI Desktop caches the Report in memory while the file is open.
@@ -473,10 +493,10 @@ async def emit_report(
     pbip = _resolve_pbip(pbip_path)
     schema = sanitize_schema(ModelSchema.model_validate_json(schema_json))
     try:
-        validate_mockup(html, schema)
+        validator_warnings = validate_mockup(html, schema)
     except ValidationError as exc:
         raise ValueError(str(exc)) from exc
-    report_dir = await emit_pbir(
+    result = await emit_pbir(
         html=html,
         schema=schema,
         report_name=pbip.stem,
@@ -496,7 +516,7 @@ async def emit_report(
         # model matches the report SimBI emitted from the sanitized schema.
         sanitize_semantic_model_dir(semantic_model_dir)
         patch_semantic_model_measures(schema, semantic_model_dir)
-    return str(report_dir)
+    return _format_emit_result(result, validator_warnings)
 
 
 def main() -> None:

@@ -73,3 +73,27 @@ def test_main_is_importable_from_package() -> None:
     from simbi_mcp import main
     from simbi_mcp.server import main as server_main
     assert main is server_main
+
+
+async def test_emit_report_output_format_first_line_is_report_path() -> None:
+    # Contract test on the formatter, not the pipeline: format_emit_result is a
+    # pure function so no Chrome/pbip is needed.
+    from pathlib import Path
+
+    from simbi_mcp.pbir.emitter import EmitResult
+    from simbi_mcp.server import _format_emit_result
+
+    result = EmitResult(
+        report_dir=Path("C:/x/R.Report"),
+        previews=[Path("C:/x/simbi-preview/Overview.png")],
+        styling_notes=["card 'Total Revenue': background #FFFFFF"],
+        warnings=["something to know"],
+    )
+    text = _format_emit_result(result, validator_warnings=["w1"])
+    lines = text.splitlines()
+    assert lines[0] == ".Report written: C:\\x\\R.Report" or lines[0] == ".Report written: C:/x/R.Report"
+    assert any("NOT a Power BI render" in line for line in lines)
+    assert any("Overview.png" in line for line in lines)
+    assert any("background #FFFFFF" in line for line in lines)
+    assert any("w1" in line for line in lines)
+    assert any("something to know" in line for line in lines)
