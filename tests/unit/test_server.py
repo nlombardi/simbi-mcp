@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from simbi_mcp.server import mcp
 from simbi_mcp.types import ModelSchema
 
@@ -73,6 +75,69 @@ def test_main_is_importable_from_package() -> None:
     from simbi_mcp import main
     from simbi_mcp.server import main as server_main
     assert main is server_main
+
+
+def _scaffold_pbip(tmp_path) -> str:
+    pbip = tmp_path / "Test.pbip"
+    pbip.write_text("{}", encoding="utf-8")
+    definition = tmp_path / "Test.SemanticModel" / "definition"
+    (definition / "tables").mkdir(parents=True)
+    (definition / "model.tmdl").write_text(
+        "model Model\n\tculture: en-US\n\nref cultureInfo en-US\n", encoding="utf-8"
+    )
+    return str(pbip)
+
+
+async def test_write_semantic_model_tool_persists_table(tmp_path) -> None:
+    pbip_path = _scaffold_pbip(tmp_path)
+    tmdl = (
+        "table sales\n"
+        "\tlineageTag: 11111111-1111-4111-8111-111111111111\n\n"
+        "\tcolumn Region\n\t\tdataType: string\n"
+        "\t\tlineageTag: 22222222-2222-4222-8222-222222222222\n\n"
+        "\tpartition sales = m\n\t\tmode: import\n\t\tsource = let x = 1 in x\n\n"
+        "\tmeasure 'Total Revenue' = SUM(sales[Value])\n"
+    )
+    _, result = await mcp.call_tool(
+        "write_semantic_model", {"tmdl": tmdl, "pbip_path": pbip_path}
+    )
+    text = result["result"]
+    assert "Semantic model written" in text
+    written = tmp_path / "Test.SemanticModel" / "definition" / "tables" / "sales.tmdl"
+    assert written.exists()
+    assert "measure 'Total Revenue'" in written.read_text(encoding="utf-8")
+
+
+async def test_write_semantic_model_tool_reports_renames(tmp_path) -> None:
+    pbip_path = _scaffold_pbip(tmp_path)
+    tmdl = (
+        "table Measures\n"
+        "\tlineageTag: 33333333-3333-4333-8333-333333333333\n\n"
+        "\tmeasure 'X' = 1\n\n"
+        "\tpartition Measures = calculated\n\t\tmode: import\n\t\tsource = {1}\n"
+    )
+    _, result = await mcp.call_tool(
+        "write_semantic_model", {"tmdl": tmdl, "pbip_path": pbip_path}
+    )
+    assert "_Measures" in result["result"]
+
+
+async def test_write_semantic_model_tool_raises_on_bad_indentation(tmp_path) -> None:
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    pbip_path = _scaffold_pbip(tmp_path)
+    tmdl = (
+        "table sales\n"
+        "\tlineageTag: 11111111-1111-4111-8111-111111111111\n\n"
+        "\tcolumn Region\n\t\tdataType: string\n"
+        "\t\tlineageTag: 22222222-2222-4222-8222-222222222222\n\n"
+        "\tpartition sales = m\n\t\tmode: import\n\t\tsource = let x = 1 in x\n\n"
+        "  measure 'Total Revenue' = SUM(sales[Value])\n"
+    )
+    with pytest.raises(ToolError, match="(?i)tab"):
+        await mcp.call_tool(
+            "write_semantic_model", {"tmdl": tmdl, "pbip_path": pbip_path}
+        )
 
 
 async def test_emit_report_output_format_first_line_is_report_path() -> None:
