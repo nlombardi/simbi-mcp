@@ -21,6 +21,7 @@ from simbi_mcp.mockup.validator import (
     validate_mockup,
 )
 from simbi_mcp.pbir.emitter import EmitResult, emit_pbir
+from simbi_mcp.pbir.model_writer import write_semantic_model as _write_semantic_model
 from simbi_mcp.pbir.reserved_names import sanitize_schema, sanitize_semantic_model_dir
 from simbi_mcp.pbir.semantic_patcher import patch_semantic_model_measures
 from simbi_mcp.semantic.schema_reader import parse_tmdl_schema
@@ -285,6 +286,38 @@ def parse_schema(tmdl: str) -> str:
                 raise ValueError(f"No .tmdl files found in {candidate}")
     schema = sanitize_schema(parse_tmdl_schema(tmdl_text))
     return schema.model_dump_json()
+
+
+@mcp.tool()
+def write_semantic_model(tmdl: str, pbip_path: str) -> str:
+    """Persist agent-authored table/relationship TMDL into the .SemanticModel, normalized.
+
+    Call this to save TMDL you drafted — do NOT write .tmdl files yourself with
+    a file-editing tool. Hand-written TMDL routinely gets indentation wrong
+    (TMDL requires literal TAB characters; a measure/column not nested one tab
+    under its table, or indented with spaces, fails to open in Power BI
+    Desktop with a cryptic "Invalid indentation" error). This repairs that,
+    renames reserved table names (e.g. "Measures") everywhere referenced,
+    repairs known partition corruptions, and refuses to write anything if a
+    load-blocking DAX/lineage/GUID error is found.
+
+    Args:
+      tmdl: full model TMDL — one or more `table <name>` blocks (columns,
+        partition, measures) and optional `relationship <guid>` blocks.
+      pbip_path: EXISTING .pbip file, or a folder containing exactly one.
+
+    Returns a short report: tables written, plus any reserved-name renames.
+    Raises ValueError (nothing written) on structural errors — fix and retry.
+    """
+    pbip = _resolve_pbip(pbip_path)
+    semantic_model_dir = pbip.parent / f"{pbip.stem}.SemanticModel"
+    renames = _write_semantic_model(semantic_model_dir, tmdl)
+    msg = f"Semantic model written to {semantic_model_dir}"
+    if renames:
+        msg += "\nReserved-name renames applied: " + ", ".join(
+            f"{old} -> {new}" for old, new in renames.items()
+        )
+    return msg
 
 
 @mcp.tool()
