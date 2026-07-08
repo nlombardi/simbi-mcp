@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from simbi_mcp.pbir.bookmarks import build_bookmark_json, resolve_targets
@@ -20,6 +21,14 @@ from simbi_mcp.pbir.writer import PageSpec, _new_guid, write_report
 from simbi_mcp.types import Bookmark, FieldParameter, ModelSchema
 
 _DASHBOARD_CSS = Path(__file__).parent.parent / "mockup" / "dashboard.css"
+
+
+@dataclass
+class EmitResult:
+    report_dir: Path
+    previews: list[Path] = field(default_factory=list)
+    styling_notes: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
 
 def _resolve_semantic_model_dir(output_dir: Path, report_name: str, semantic_model_rel_path: str | None) -> Path:
@@ -100,7 +109,7 @@ async def emit_pbir(
     output_dir: Path,
     semantic_model_rel_path: str | None = None,
     theme_path: Path | None = None,
-) -> Path:
+) -> EmitResult:
     """Render html in system Chrome, extract annotations, write the .Report folder.
 
     The .pbip and .SemanticModel are produced by Power BI Desktop / Power BI MCP
@@ -115,7 +124,7 @@ async def emit_pbir(
     Creates:
       output_dir/<report_name>.Report/        (PBIR report folder)
 
-    Returns the path to the .Report folder that was written.
+    Returns an EmitResult (report_dir, previews, styling_notes, warnings).
     """
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
@@ -123,7 +132,9 @@ async def emit_pbir(
         html_file.write_text(html, encoding="utf-8")
         shutil.copy(_DASHBOARD_CSS, tmp_path / "dashboard.css")
 
-        extract_result = await extract_visuals(html_file)
+        extract_result = await extract_visuals(
+            html_file, screenshot_dir=output_dir / "simbi-preview"
+        )
     nodes = extract_result.nodes
 
     # Bookmark nodes are metadata, not rendered visuals — exclude them from
@@ -163,6 +174,18 @@ async def emit_pbir(
             background=page_background_card(page_bg),
         ))
 
+    styling_notes: list[str] = []
+    styling_warnings: list[str] = []
+    for v in all_visuals:
+        stash = v.get("simbiStyling")
+        if not stash:
+            continue
+        vtype_str = v["visual"]["visualType"]
+        label = f" {stash['label']!r}" if stash["label"] else ""
+        if stash["honored"]:
+            styling_notes.append(f"{vtype_str}{label}: {', '.join(stash['honored'])}")
+        styling_warnings.extend(f"{vtype_str}{label}: {w}" for w in stash["warnings"])
+
     # Bookmarks reference the first page's GUID (multi-page bookmark scoping
     # is not yet supported — bookmarks always anchor to page 0).
     bookmarks_meta = collect_bookmarks(nodes)
@@ -181,11 +204,17 @@ async def emit_pbir(
             bookmark_dicts.append(bj)
         resolve_button_actions(all_visuals, name_to_guid)
 
-    return write_report(
+    report_dir = write_report(
         pages=page_specs,
         report_name=report_name,
         output_dir=output_dir,
         semantic_model_rel_path=semantic_model_rel_path,
         theme=theme,
         bookmarks=bookmark_dicts,
+    )
+    return EmitResult(
+        report_dir=report_dir,
+        previews=extract_result.previews,
+        styling_notes=styling_notes,
+        warnings=extract_result.warnings + styling_warnings,
     )
