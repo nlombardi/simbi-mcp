@@ -1,56 +1,11 @@
 """Shared Pydantic models for the SimBI semantic layer.
 
-These types form the contract between:
-- profiler.py (produces DatasetProfile)
-- planner.py (produces list[MeasurePlan])
-- pbi_client.py / schema_reader.py (produce ModelSchema)
-- downstream phases (consume ModelSchema as input)
+These types form the contract between schema_reader.py (produces ModelSchema)
+and downstream phases (consume ModelSchema as input).
 """
 from __future__ import annotations
 
-from enum import StrEnum
-
 from pydantic import BaseModel, ConfigDict, Field
-
-
-class ColumnRole(StrEnum):
-    """How a column should be used in dashboards."""
-
-    MEASURE = "measure"      # numeric facts (sums, averages)
-    DIMENSION = "dimension"  # categories (group-by, axis)
-    DATE = "date"            # temporal axis
-    ID = "id"                # identifiers (not for aggregation)
-
-
-class ColumnProfile(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    name: str
-    dtype: str
-    role: ColumnRole
-    null_count: int = Field(ge=0)
-    distinct_count: int = Field(ge=0)
-    sample_values: list[str | int | float | bool | None]
-
-
-class DatasetProfile(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    source_path: str
-    table_name: str
-    row_count: int = Field(ge=0)
-    columns: list[ColumnProfile]
-
-
-class MeasurePlan(BaseModel):
-    """A measure the planner wants to create."""
-
-    model_config = ConfigDict(frozen=True)
-
-    name: str
-    expression: str       # DAX expression
-    return_type: str      # currency | number | percentage | integer
-    rationale: str        # why the planner chose this
 
 
 class ModelColumn(BaseModel):
