@@ -41,6 +41,13 @@ _FATAL_LINT_RULES = frozenset(
 _BLOCK_START_RE = re.compile(r"^(?P<kind>table|relationship) (?P<rest>.+?)\s*$")
 _TABLE_NAME_RE = re.compile(r"^(?:'(?P<q>.+?)'|(?P<u>\S+))")
 
+# Keywords that start a table member (one tab under `table <name>`). Used to
+# detect agent-authored members left at the wrong indentation depth.
+_MEMBER_KEYWORD_RE = re.compile(
+    r"^[ \t]*(measure|column|partition|hierarchy|variation|calculationGroup|"
+    r"extendedProperty|changedProperty|annotation)\b"
+)
+
 
 @dataclass
 class ModelBlock:
@@ -149,14 +156,67 @@ def _apply_table_renames(
     return out
 
 
+def _detect_space_indentation(text: str) -> int | None:
+    """Return the 1-based line number of the first space-indented line in a
+    table block's body, or None if every line uses tabs (or is blank).
+
+    TMDL requires literal TAB characters for indentation. Power BI Desktop's
+    parser rejects space-indented lines outright — "Invalid indentation was
+    detected" — even when the spacing is internally consistent (e.g. a
+    uniform 2-space convention). Guessing the intended nesting depth from a
+    space count is unsafe, so this is a hard-fail signal, not something to
+    auto-repair.
+
+    The first line (the `table <name>` header, always column 0) is skipped —
+    it is legitimately unindented and must not be mistaken for the defect.
+    """
+    lines = text.split("\n")
+    for i, line in enumerate(lines[1:], start=2):
+        if line[:1] == " ":
+            return i
+    return None
+
+
+def _reindent_stray_members(text: str) -> str:
+    """Re-indent table members left at column 0 instead of nested under the table.
+
+    A common agent-authoring mistake: writing measures (or occasionally
+    columns) as a trailing section after the table's other members, flush
+    with the `table <name>` header's own left margin instead of one tab
+    under it. Power BI Desktop rejects this with "Invalid indentation was
+    detected" since the member no longer reads as belonging to the table.
+
+    Detects each member header line (measure/column/partition/...) that
+    starts at column 0, and shifts it — and every following line up to the
+    next member header — one tab deeper. Already-correctly-indented members
+    (and everything nested under them) are left untouched, so this is safe
+    to apply unconditionally; a fully-correct block round-trips unchanged.
+    """
+    lines = text.split("\n")
+    if not lines:
+        return text
+    out = [lines[0]]  # `table <name>` header — always column 0, never touched
+    shifting = False
+    for line in lines[1:]:
+        if _MEMBER_KEYWORD_RE.match(line):
+            indent_len = len(line) - len(line.lstrip("\t"))
+            shifting = indent_len == 0 and bool(line.strip())
+        if shifting and line.strip():
+            line = "\t" + line
+        out.append(line)
+    return "\n".join(out)
+
+
 def write_semantic_model(semantic_model_dir: Path, tmdl: str) -> dict[str, str]:
     """Persist a full agent-authored model TMDL to disk, normalized.
 
     Splits the TMDL into table/relationship blocks, rewrites reserved table names
-    everywhere they appear, repairs partitions, and refuses to write (raising
-    ValueError) if any load-crash lint rule fires. On success writes each table
-    to ``tables/<name>.tmdl``, writes ``relationships.tmdl`` when relationships
-    are supplied, and registers every table in ``model.tmdl``.
+    everywhere they appear, repairs partitions, re-indents members left at the
+    wrong depth, and refuses to write (raising ValueError) if any load-crash
+    lint rule fires OR any line uses space instead of tab indentation. On
+    success writes each table to ``tables/<name>.tmdl``, writes
+    ``relationships.tmdl`` when relationships are supplied, and registers every
+    table in ``model.tmdl``.
 
     Returns the ``{old: new}`` reserved-name rename map (empty when none).
     """
@@ -164,8 +224,27 @@ def write_semantic_model(semantic_model_dir: Path, tmdl: str) -> dict[str, str]:
     renames = _reserved_renames(blocks)
     blocks = _apply_table_renames(blocks, renames)
 
+    # Fail loudly BEFORE any repair or write: space-indentation can't be
+    # safely auto-corrected (we don't know the author's intended depth-per-
+    # level), so this must be a hard error, not a silent guess.
+    for b in blocks:
+        if b.kind != "table":
+            continue
+        bad_line = _detect_space_indentation(b.text)
+        if bad_line is not None:
+            raise ValueError(
+                f"Table {b.name!r} uses space indentation on line {bad_line} "
+                f"of its block, not tabs. TMDL requires literal TAB characters "
+                f"for every nesting level — table members (measure/column/"
+                f"partition/...) one tab under 'table {b.name}', their own "
+                f"properties one tab deeper still. Power BI Desktop rejects "
+                f"space-indented TMDL with 'Invalid indentation was detected' "
+                f"even when the spacing is internally consistent. Rewrite this "
+                f"table's members using tabs and call write_semantic_model again."
+            )
+
     table_blocks = [
-        ModelBlock(b.kind, b.name, _sanitize_tmdl(b.text))
+        ModelBlock(b.kind, b.name, _sanitize_tmdl(_reindent_stray_members(b.text)))
         for b in blocks
         if b.kind == "table"
     ]

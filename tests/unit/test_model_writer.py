@@ -7,6 +7,8 @@ import pytest
 
 from simbi_mcp.pbir.model_writer import (
     _apply_table_renames,
+    _detect_space_indentation,
+    _reindent_stray_members,
     _reserved_renames,
     _split_model_blocks,
     write_semantic_model,
@@ -192,3 +194,128 @@ class TestWriteSemanticModel:
             write_semantic_model(sm, tmdl)
         # Nothing partially written on failure.
         assert not (sm / "definition" / "tables" / "A.tmdl").exists()
+
+
+# ---------- Indentation repair/validation (Power BI TMDL requires literal tabs) ----------
+
+# Reproduces the reported failure: columns properly indented (1 tab), measures
+# floating at column 0 (0 tabs) instead of nested under the table, with a
+# multi-line DAX body left at its original (now too-shallow) depth.
+_STRAY_MEASURES_TMDL = """\
+table WEO
+\tlineageTag: 81fd2903-8b6b-4b1e-b0e9-3e0d5c8a2c1f
+
+\tcolumn "INDICATOR.ID"
+\t\tdataType: string
+\t\tlineageTag: c3d4e5f6-a7b8-4c9d-0e1f-2a3b4c5d6e7f
+
+\tcolumn Value
+\t\tdataType: double
+\t\tlineageTag: a7b8c9d0-e1f2-4a3b-5c6d-7e8f9a0b1c2d
+
+\tpartition WEO = m
+\t\tmode: import
+\t\tsource =
+\t\t\tlet x = 1 in x
+
+measure "Real GDP" =
+\tCALCULATE(
+\t\tAVERAGE([Value]),
+\t\tFILTER('WEO', 'WEO'[INDICATOR.ID] = "NGDP_RPCH")
+\t)
+
+measure "GDP Value" = SUM([Value])
+"""
+
+
+class TestReindentStrayMembers:
+    def test_shifts_column_zero_measure_header_and_body(self) -> None:
+        blocks = _split_model_blocks(_STRAY_MEASURES_TMDL)
+        weo = next(b for b in blocks if b.name == "WEO")
+        out = _reindent_stray_members(weo.text)
+        assert '\tmeasure "Real GDP" =' in out
+        assert '\n\t\tCALCULATE(' in out
+        assert '\n\t\t\tAVERAGE([Value]),' in out
+        assert '\n\t\t\tFILTER(' in out
+        assert '\n\t\t)' in out
+        # No non-blank line after the `table` header is left at column 0.
+        lines = out.split("\n")
+        for line in lines[1:]:
+            if line.strip():
+                assert line.startswith("\t"), f"still at column 0: {line!r}"
+
+    def test_shifts_single_line_measure(self) -> None:
+        blocks = _split_model_blocks(_STRAY_MEASURES_TMDL)
+        weo = next(b for b in blocks if b.name == "WEO")
+        out = _reindent_stray_members(weo.text)
+        assert '\tmeasure "GDP Value" = SUM([Value])' in out
+
+    def test_leaves_correctly_indented_content_untouched(self) -> None:
+        blocks = _split_model_blocks(_FULL_MODEL_TMDL)
+        weo_long = next(b for b in blocks if b.name == "WEO_Long")
+        out = _reindent_stray_members(weo_long.text)
+        assert out == weo_long.text  # fully idempotent — nothing was stray
+
+    def test_table_header_line_never_shifted(self) -> None:
+        blocks = _split_model_blocks(_STRAY_MEASURES_TMDL)
+        weo = next(b for b in blocks if b.name == "WEO")
+        out = _reindent_stray_members(weo.text)
+        assert out.split("\n")[0] == "table WEO"
+
+    def test_stray_column_is_also_reindented(self) -> None:
+        tmdl = 'table T\n\tlineageTag: x\n\ncolumn Stray\n\tdataType: string\n\tlineageTag: y\n'
+        blocks = _split_model_blocks(tmdl)
+        t = next(b for b in blocks if b.name == "T")
+        out = _reindent_stray_members(t.text)
+        assert "\tcolumn Stray" in out
+        assert "\t\tdataType: string" in out
+
+
+class TestDetectSpaceIndentation:
+    def test_finds_first_space_indented_line(self) -> None:
+        tmdl = (
+            'table WEO\n\tlineageTag: x\n\n'
+            '  measure "Average Value" = AVERAGE([Value])\n'
+        )
+        blocks = _split_model_blocks(tmdl)
+        weo = next(b for b in blocks if b.name == "WEO")
+        assert _detect_space_indentation(weo.text) == 4
+
+    def test_returns_none_when_clean(self) -> None:
+        blocks = _split_model_blocks(_FULL_MODEL_TMDL)
+        weo_long = next(b for b in blocks if b.name == "WEO_Long")
+        assert _detect_space_indentation(weo_long.text) is None
+
+    def test_table_header_column_zero_is_not_flagged(self) -> None:
+        # The `table X` header line itself is legitimately at column 0 with no
+        # leading space — must not be mistaken for space-indentation.
+        blocks = _split_model_blocks("table WEO\n\tlineageTag: x\n")
+        weo = next(b for b in blocks if b.name == "WEO")
+        assert _detect_space_indentation(weo.text) is None
+
+
+class TestWriteSemanticModelIndentation:
+    def test_repairs_stray_measures_before_writing(self, tmp_path):
+        sm = _scaffold_semantic_model(tmp_path)
+        write_semantic_model(sm, _STRAY_MEASURES_TMDL)
+
+        body = (sm / "definition" / "tables" / "WEO.tmdl").read_text(encoding="utf-8")
+        lines = body.split("\n")
+        for line in lines[1:]:
+            if line.strip():
+                assert line.startswith("\t"), f"still at column 0 on disk: {line!r}"
+        assert '\tmeasure "Real GDP" =' in body
+        assert '\tmeasure "GDP Value" = SUM([Value])' in body
+
+    def test_rejects_space_indentation_and_writes_nothing(self, tmp_path):
+        sm = _scaffold_semantic_model(tmp_path)
+        tmdl = (
+            "table WEO\n\tlineageTag: 11111111-1111-4111-8111-111111111111\n\n"
+            "\tcolumn Value\n\t\tdataType: double\n"
+            "\t\tlineageTag: 22222222-2222-4222-8222-222222222222\n\n"
+            "\tpartition WEO = m\n\t\tmode: import\n\t\tsource = let x = 1 in x\n\n"
+            '  measure "Average Value" = AVERAGE([Value])\n'
+        )
+        with pytest.raises(ValueError, match="(?i)tab"):
+            write_semantic_model(sm, tmdl)
+        assert not (sm / "definition" / "tables" / "WEO.tmdl").exists()
