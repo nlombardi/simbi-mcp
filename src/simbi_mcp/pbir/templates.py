@@ -314,11 +314,13 @@ def _build_chrome_visual(
 ) -> dict[str, Any]:
     """Build the `visual` object for a no-query chrome visual (shape/text/button).
 
-    These never carry a `query` key. Fill/stroke/role styling is owned by the
-    theme (Task 9); only the structural content (shapeType / paragraph text /
-    button label) is emitted here. The button's bookmark action is stashed on
-    the container by build_visual_json, not here, because it resolves in a later
-    pass once bookmark GUIDs are known.
+    These never carry a `query` key; only the structural content (shapeType /
+    paragraph text / button label) is emitted here. Shape fill/outline/roundEdge
+    are merged in separately by build_visual_json (data-pbi-fill/data-pbi-stroke
+    or computed CSS, via shape_objects_from_styles) — this function only seeds
+    shape's tileShape. The button's bookmark action is stashed on the container
+    by build_visual_json, not here, because it resolves in a later pass once
+    bookmark GUIDs are known.
     `schema` is required when attrs contains `data-pbi-title-measure`.
     """
     visual: dict[str, Any] = {
