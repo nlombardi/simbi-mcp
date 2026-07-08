@@ -97,3 +97,31 @@ async def test_emit_report_output_format_first_line_is_report_path() -> None:
     assert any("background #FFFFFF" in line for line in lines)
     assert any("w1" in line for line in lines)
     assert any("something to know" in line for line in lines)
+
+
+async def test_get_vocabulary_tool_returns_full_spec() -> None:
+    _, result = await mcp.call_tool("get_vocabulary", {})
+    text = result["result"]
+    assert "ANNOTATION VOCABULARY" in text
+    assert "UNIVERSAL ATTRIBUTES" in text
+    assert "STYLING CONTRACT" in text
+    assert "AVAILABLE CSS CLASSES" in text
+    assert "waterfallChart" in text  # a type the old docstring never mentioned
+
+
+async def test_all_tool_descriptions_within_client_budget() -> None:
+    tools = await mcp.list_tools()
+    assert tools, "no tools registered"
+    for tool in tools:
+        desc = tool.description or ""
+        assert len(desc) <= 1000, (
+            f"Tool {tool.name!r} description is {len(desc)} chars (max 1000) — "
+            f"MCP clients truncate long descriptions mid-sentence."
+        )
+
+
+async def test_emit_report_docstring_points_to_vocabulary() -> None:
+    tools = await mcp.list_tools()
+    emit = next(t for t in tools if t.name == "emit_report")
+    assert "get_vocabulary" in (emit.description or "")
+    assert "columnChart" not in (emit.description or ""), "stale vocab list must be gone"
