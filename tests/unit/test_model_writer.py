@@ -270,6 +270,29 @@ class TestReindentStrayMembers:
         assert "\tcolumn Stray" in out
         assert "\t\tdataType: string" in out
 
+    def test_stray_member_with_nested_annotation_keeps_annotation_nested(self) -> None:
+        # `annotation` is itself a recognized member keyword, but here it's a
+        # NESTED property of the stray column (matching how Power BI commonly
+        # writes `annotation SummarizationSetBy = Automatic` under a column),
+        # not a sibling table-level member. It must shift WITH the column, not
+        # get left behind at the column's old (pre-shift) depth.
+        tmdl = (
+            "table T\n\tlineageTag: x\n\n"
+            "column Stray\n"
+            "\tdataType: string\n"
+            "\tannotation SummarizationSetBy = Automatic\n"
+            "\tlineageTag: y\n"
+        )
+        blocks = _split_model_blocks(tmdl)
+        t = next(b for b in blocks if b.name == "T")
+        out = _reindent_stray_members(t.text)
+        lines = out.split("\n")
+        for line in lines[1:]:
+            if line.strip():
+                assert line.startswith("\t"), f"still at column 0: {line!r}"
+        assert "\t\tannotation SummarizationSetBy = Automatic" in out
+        assert "\t\tlineageTag: y" in out  # the line AFTER annotation also stays shifted
+
 
 class TestDetectSpaceIndentation:
     def test_finds_first_space_indented_line(self) -> None:
@@ -290,6 +313,13 @@ class TestDetectSpaceIndentation:
         # The `table X` header line itself is legitimately at column 0 with no
         # leading space — must not be mistaken for space-indentation.
         blocks = _split_model_blocks("table WEO\n\tlineageTag: x\n")
+        weo = next(b for b in blocks if b.name == "WEO")
+        assert _detect_space_indentation(weo.text) is None
+
+    def test_whitespace_only_blank_line_is_not_flagged(self) -> None:
+        # A line containing only spaces is blank, not space-indented content.
+        tmdl = "table WEO\n\tlineageTag: x\n   \n\tcolumn Y\n\t\tdataType: string\n"
+        blocks = _split_model_blocks(tmdl)
         weo = next(b for b in blocks if b.name == "WEO")
         assert _detect_space_indentation(weo.text) is None
 

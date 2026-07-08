@@ -322,8 +322,8 @@ def write_semantic_model(tmdl: str, pbip_path: str) -> str:
         partition, measures) and optional `relationship <guid>` blocks.
       pbip_path: EXISTING .pbip file, or a folder containing exactly one.
 
-    Returns a short report: tables written, plus any reserved-name renames.
-    Raises ValueError (nothing written) on structural errors — fix and retry.
+    Returns a short report: tables written, plus reserved-name renames.
+    Raises ValueError (nothing written) on errors — fix the TMDL and retry.
     """
     pbip = _resolve_pbip(pbip_path)
     semantic_model_dir = pbip.parent / f"{pbip.stem}.SemanticModel"

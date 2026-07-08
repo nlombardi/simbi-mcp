@@ -536,7 +536,7 @@ data-pbi element triggers a validator warning.
 def build_annotation_spec() -> str:
     """Render the full annotation vocabulary from VISUAL_ATTRS — the single
     source of truth. Regenerated at import; consumed by the get_vocabulary
-    tool, the MCP resource, and the mockup generator prompt."""
+    tool and the MCP resource."""
     lines: list[str] = [
         "ANNOTATION VOCABULARY",
         "=====================",
@@ -566,7 +566,7 @@ def build_annotation_spec() -> str:
 
 ANNOTATION_SPEC_TEXT: str = build_annotation_spec()
 
-# Embedded in generator system prompt — lists every CSS class Claude may use.
+# Exposed via get_vocabulary — lists every CSS class the calling agent may use.
 CSS_CLASS_CATALOG: str = """\
 AVAILABLE CSS CLASSES
 =====================
