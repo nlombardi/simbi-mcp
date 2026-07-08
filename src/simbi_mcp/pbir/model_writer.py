@@ -172,6 +172,8 @@ def _detect_space_indentation(text: str) -> int | None:
     """
     lines = text.split("\n")
     for i, line in enumerate(lines[1:], start=2):
+        if not line.strip():
+            continue
         if line[:1] == " ":
             return i
     return None
@@ -188,9 +190,15 @@ def _reindent_stray_members(text: str) -> str:
 
     Detects each member header line (measure/column/partition/...) that
     starts at column 0, and shifts it — and every following line up to the
-    next member header — one tab deeper. Already-correctly-indented members
-    (and everything nested under them) are left untouched, so this is safe
-    to apply unconditionally; a fully-correct block round-trips unchanged.
+    next column-0 line — one tab deeper. The shift state is keyed on column-0
+    only, NOT on every keyword match: a keyword like `annotation` commonly
+    appears as a NESTED property of a column/measure (e.g. `annotation
+    SummarizationSetBy = Automatic`), at whatever depth the stray member's own
+    body sits at, and must keep shifting with it rather than being mistaken
+    for a fresh, already-correct sibling. Already-correctly-indented members
+    (and everything nested under them, which never reaches column 0) are left
+    untouched, so this is safe to apply unconditionally; a fully-correct
+    block round-trips unchanged.
     """
     lines = text.split("\n")
     if not lines:
@@ -198,9 +206,13 @@ def _reindent_stray_members(text: str) -> str:
     out = [lines[0]]  # `table <name>` header — always column 0, never touched
     shifting = False
     for line in lines[1:]:
-        if _MEMBER_KEYWORD_RE.match(line):
+        if line.strip():
             indent_len = len(line) - len(line.lstrip("\t"))
-            shifting = indent_len == 0 and bool(line.strip())
+            if indent_len == 0:
+                # Only column 0 marks a fresh (potentially stray) member —
+                # anything deeper is either already-correct content or the
+                # nested body of whatever member we're currently shifting.
+                shifting = bool(_MEMBER_KEYWORD_RE.match(line))
         if shifting and line.strip():
             line = "\t" + line
         out.append(line)
