@@ -87,3 +87,40 @@ class Bookmark(BaseModel):
     target: list[str] = Field(default_factory=list)
     visible: list[str] = Field(default_factory=list)
     hidden: list[str] = Field(default_factory=list)
+
+
+class ColumnProfile(BaseModel):
+    """One column's stats from analyze_data_source, before TMDL authoring."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    polars_dtype: str
+    tmdl_type: str
+    null_count: int
+    null_pct: float
+    distinct_count: int
+    sample_values: list[str] = Field(default_factory=list)
+    min: str | None = None
+    max: str | None = None
+    hints: list[str] = Field(default_factory=list)
+
+
+class TableProfile(BaseModel):
+    """One table's (sheet or CSV) profile from analyze_data_source."""
+
+    model_config = ConfigDict(frozen=True)
+
+    table_name: str
+    row_count: int
+    columns: list[ColumnProfile]
+    hints: list[str] = Field(default_factory=list)
+
+
+class DataSourceProfile(BaseModel):
+    """Full analyze_data_source result: one or more tables from one file."""
+
+    model_config = ConfigDict(frozen=True)
+
+    source_path: str
+    tables: list[TableProfile]
