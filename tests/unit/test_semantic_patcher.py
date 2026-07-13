@@ -84,6 +84,55 @@ class TestRegisterRefTables:
         model_content = (sm / "definition" / "model.tmdl").read_text(encoding="utf-8")
         assert model_content.count("ref table MacroData") == 1
 
+    def test_ref_table_name_with_space_is_quoted(self, tmp_path):
+        # TMDL's `ref table <name>` grammar takes exactly one token; a bare
+        # multi-word name ("ref table Economic Data") fails to parse in Power
+        # BI Desktop with "the object name is followed by an invalid token" —
+        # the name must be quoted, matching how `table 'Name'` is quoted
+        # elsewhere whenever it contains whitespace.
+        sm = _scaffold_semantic_model(tmp_path)
+        schema = _make_schema("Economic Data", "GDP Value")
+
+        patch_semantic_model_measures(schema, sm)
+
+        model_content = (sm / "definition" / "model.tmdl").read_text(encoding="utf-8")
+        assert "ref table 'Economic Data'" in model_content
+        assert "ref table Economic Data\n" not in model_content
+
+    def test_idempotent_for_quoted_ref_table_name(self, tmp_path):
+        sm = _scaffold_semantic_model(tmp_path)
+        schema = _make_schema("Economic Data", "GDP Value")
+
+        patch_semantic_model_measures(schema, sm)
+        patch_semantic_model_measures(schema, sm)
+
+        model_content = (sm / "definition" / "model.tmdl").read_text(encoding="utf-8")
+        assert model_content.count("ref table 'Economic Data'") == 1
+
+    def test_new_table_header_with_space_is_quoted(self, tmp_path):
+        # Same underlying defect as the ref-table bug: a bare `table Economic
+        # Data` header (no existing .tmdl, so _build_minimal_tmdl creates it)
+        # is exactly as unparseable as the unquoted ref line was.
+        sm = _scaffold_semantic_model(tmp_path)
+        schema = _make_schema(
+            "Economic Data", "GDP Value",
+            columns=[ModelColumn(name="Country Code", data_type="string")],
+        )
+
+        patch_semantic_model_measures(schema, sm)
+
+        table_content = (sm / "definition" / "tables" / "Economic Data.tmdl").read_text(
+            encoding="utf-8"
+        )
+        assert "table 'Economic Data'" in table_content
+        assert "table Economic Data\n" not in table_content
+        # Column headers need the same quoting when the name has a space...
+        assert "column 'Country Code'" in table_content
+        assert "column Country Code\n" not in table_content
+        # ...but sourceColumn is a property VALUE, not an object header, and
+        # real Power BI exports leave it unquoted even with spaces.
+        assert "sourceColumn: Country Code" in table_content
+
     def test_multiple_new_tables_all_registered(self, tmp_path):
         sm = _scaffold_semantic_model(tmp_path)
         schema = ModelSchema(

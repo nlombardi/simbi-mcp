@@ -148,6 +148,27 @@ class TestWriteSemanticModel:
         assert "table _Measures" in body
         assert "_Measures[Value]" in body
 
+    def test_multiword_table_name_ref_is_quoted(self, tmp_path):
+        # Reproduces the real-world failure: a table named "Economic Data"
+        # (quoted in the agent-authored header, per TMDL's own requirement)
+        # must ALSO get a quoted `ref table 'Economic Data'` line in
+        # model.tmdl -- an unquoted ref line fails with "InvalidObjectHeader:
+        # the object name is followed by an invalid token".
+        sm = _scaffold_semantic_model(tmp_path)
+        tmdl = (
+            "table 'Economic Data'\n"
+            "\tlineageTag: 11111111-1111-4111-8111-111111111111\n\n"
+            "\tcolumn Value\n\t\tdataType: double\n"
+            "\t\tlineageTag: 22222222-2222-4222-8222-222222222222\n\n"
+            "\tpartition 'Economic Data' = m\n\t\tmode: import\n\t\tsource = let x = 1 in x\n\n"
+            "\tmeasure 'GDP Value' = SUM('Economic Data'[Value])\n"
+        )
+        write_semantic_model(sm, tmdl)
+
+        model_content = (sm / "definition" / "model.tmdl").read_text(encoding="utf-8")
+        assert "ref table 'Economic Data'" in model_content
+        assert "ref table Economic Data\n" not in model_content
+
     def test_relationships_and_refs_written(self, tmp_path):
         sm = _scaffold_semantic_model(tmp_path)
         write_semantic_model(sm, _RESERVED_MODEL_TMDL)

@@ -192,6 +192,19 @@ def _insert_measures(existing: str, measures: list[ModelMeasure]) -> str:
     return "\n".join(new_lines).rstrip() + "\n"
 
 
+def _quote_name(name: str) -> str:
+    """Quote a TMDL object-header name only when it contains whitespace.
+
+    `table X`/`column X`/`ref table X` headers take exactly one token — a
+    multi-word name must be quoted ('Economic Data') or Power BI Desktop
+    fails to parse it ("the object name is followed by an invalid token").
+    Property VALUES like `sourceColumn:` are a different grammar position —
+    verified against real Power BI exports, they stay unquoted even with
+    spaces — so this must only be applied to header lines, not values.
+    """
+    return f"'{name}'" if re.search(r"\s", name) else name
+
+
 def _build_minimal_tmdl(
     table_name: str,
     columns: list[ModelColumn],
@@ -199,7 +212,7 @@ def _build_minimal_tmdl(
 ) -> str:
     """Build a complete table TMDL with columns and measures but no data partition."""
     parts: list[str] = [
-        f"table {table_name}",
+        f"table {_quote_name(table_name)}",
         f"\tlineageTag: {_new_guid()}",
         "",
     ]
@@ -208,7 +221,7 @@ def _build_minimal_tmdl(
         parts.append("")
     for col in columns:
         parts += [
-            f"\tcolumn {col.name}",
+            f"\tcolumn {_quote_name(col.name)}",
             f"\t\tdataType: {col.data_type}",
             f"\t\tlineageTag: {_new_guid()}",
             f"\t\tsummarizeBy: none",
@@ -258,12 +271,12 @@ def _register_ref_tables(semantic_model_dir: Path, table_names: list[str]) -> No
 
     to_add = [
         name for name in table_names
-        if f"ref table {name}" not in existing
+        if f"ref table {_quote_name(name)}" not in existing
     ]
     if not to_add:
         return
 
-    ref_lines = [f"ref table {name}" for name in to_add]
+    ref_lines = [f"ref table {_quote_name(name)}" for name in to_add]
 
     # Insert before `ref cultureInfo` if present, otherwise before the last blank line.
     insert_at = len(lines)
