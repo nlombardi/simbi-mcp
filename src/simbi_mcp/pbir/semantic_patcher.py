@@ -26,7 +26,7 @@ from simbi_mcp.types import (
 )
 
 
-def patch_semantic_model_measures(schema: ModelSchema, semantic_model_dir: Path) -> None:
+def patch_semantic_model_measures(schema: ModelSchema, semantic_model_dir: Path) -> list[str]:
     """Write missing measures into SemanticModel TMDL files.
 
     For each table in `schema` that has measures:
@@ -43,6 +43,12 @@ def patch_semantic_model_measures(schema: ModelSchema, semantic_model_dir: Path)
     duplicate-definition error (TmdlObject.AddContentOf).
 
     Safe to call repeatedly — idempotent per measure name.
+
+    Returns a warning per NEWLY CREATED table — this fallback path is silent
+    and easy to miss (the report opens fine; the visuals just show no data).
+    A caller that intended a real data connection should have called
+    write_semantic_model with a full TMDL (table + partition) instead of
+    letting this create a bare columns/measures-only table.
     """
     tables_dir = semantic_model_dir / "definition" / "tables"
 
@@ -52,7 +58,7 @@ def patch_semantic_model_measures(schema: ModelSchema, semantic_model_dir: Path)
         measures_by_table.setdefault(measure.table, []).append(measure)
 
     if not measures_by_table:
-        return  # no measures to write
+        return []  # no measures to write
 
     # Build a lookup: table name → ModelTable (for column definitions)
     table_by_name: dict[str, ModelTable] = {t.name: t for t in schema.tables}
@@ -91,6 +97,15 @@ def patch_semantic_model_measures(schema: ModelSchema, semantic_model_dir: Path)
 
     if newly_created:
         _register_ref_tables(semantic_model_dir, newly_created)
+
+    return [
+        f"Table {name!r} had no existing .tmdl — created it with columns/measures "
+        f"only, no data source connected. Either open Power BI Desktop and use "
+        f"Home > Transform Data to connect it, or call write_semantic_model with "
+        f"a full TMDL (table + partition pointing at your CSV/Excel/data source) "
+        f"before calling emit_report, so the table is connected from the start."
+        for name in newly_created
+    ]
 
 
 def patch_field_parameters(

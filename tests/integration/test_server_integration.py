@@ -94,6 +94,28 @@ async def test_emit_report_preserves_existing_pbip_and_model(tmp_path: Path) -> 
 
 
 @pytest.mark.skipif(not _CHROME_EXE.exists(), reason="System Chrome not found")
+async def test_emit_report_warns_when_creating_table_with_no_data_connection(
+    tmp_path: Path,
+) -> None:
+    """A blank .SemanticModel (no existing table .tmdl) means emit_report falls
+    back to creating a columns/measures-only table with no partition — silent
+    and easy to miss. The tool's own output must say so loudly, since prose
+    instructions alone don't reliably stop a caller from skipping
+    write_semantic_model and going straight to emit_report."""
+    pbip = _seed_pbip(tmp_path, "TestDashboard")
+    html = (_FIXTURES_HTML / "valid_dashboard.html").read_text()
+    schema_json = _SALES_SCHEMA.model_dump_json()
+    _, result = await mcp.call_tool(
+        "emit_report",
+        {"html": html, "schema_json": schema_json, "pbip_path": str(pbip)},
+    )
+    text = result["result"]
+    assert "sales" in text
+    assert "no data source connected" in text
+    assert "write_semantic_model" in text
+
+
+@pytest.mark.skipif(not _CHROME_EXE.exists(), reason="System Chrome not found")
 async def test_emit_report_correct_visual_count(tmp_path: Path) -> None:
     pbip = _seed_pbip(tmp_path, "TestDashboard")
     html = (_FIXTURES_HTML / "valid_dashboard.html").read_text()
