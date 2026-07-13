@@ -4,7 +4,12 @@ from __future__ import annotations
 import polars as pl
 import pytest
 
-from simbi_mcp.semantic.data_profile import _column_hints, _map_dtype_to_tmdl, _table_hints, profile_dataframe
+from simbi_mcp.semantic.data_profile import (
+    _column_hints,
+    _map_dtype_to_tmdl,
+    _table_hints,
+    profile_dataframe,
+)
 from simbi_mcp.types import ColumnProfile
 
 
