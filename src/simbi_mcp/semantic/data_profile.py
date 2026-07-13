@@ -8,6 +8,8 @@ null/uniqueness stats, sample values) it would otherwise have to guess.
 """
 from __future__ import annotations
 
+import re
+
 import polars as pl
 
 from simbi_mcp.types import ColumnProfile, TableProfile
@@ -32,6 +34,43 @@ _DTYPE_TO_TMDL: dict[type, str] = {
 # Base types where min/max is meaningful — everything mapped except text/bool.
 _NUMERIC_OR_TEMPORAL: frozenset[type] = frozenset(_DTYPE_TO_TMDL) - {pl.Boolean, pl.Utf8}
 
+_ID_LIKE_RE = re.compile(r"(id|key|code)$", re.IGNORECASE)
+_YEAR_RE = re.compile(r"^(19|20)\d{2}$")
+_PERIOD_NAME_RE = re.compile(
+    r"^(Q[1-4]|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)", re.IGNORECASE
+)
+
+
+def _column_hints(name: str, dtype: pl.DataType, distinct_count: int, row_count: int) -> list[str]:
+    hints: list[str] = []
+    base = dtype.base_type()
+
+    if row_count > 0 and distinct_count == row_count and _ID_LIKE_RE.search(name):
+        hints.append("likely primary key")
+
+    if base is pl.Date or base is pl.Datetime:
+        hints.append("time-intelligence candidate")
+
+    if base is pl.Utf8 and row_count > 0:
+        low_cardinality_threshold = max(50, row_count * 0.05)
+        if distinct_count <= low_cardinality_threshold:
+            hints.append("dimension/slicer candidate")
+        elif distinct_count > row_count * 0.5:
+            hints.append("high cardinality — avoid as a slicer")
+
+    return hints
+
+
+def _table_hints(column_names: list[str]) -> list[str]:
+    period_like = [c for c in column_names if _YEAR_RE.match(c) or _PERIOD_NAME_RE.match(c)]
+    if len(period_like) < 3:
+        return []
+    return [
+        f"WIDE format detected across columns {period_like} — unpivot "
+        "(Table.UnpivotOtherColumns) into a long-form Year/Period + Value "
+        "table before aggregating; do not SUM() a single period column."
+    ]
+
 
 def _map_dtype_to_tmdl(dtype: pl.DataType) -> str:
     return _DTYPE_TO_TMDL.get(dtype.base_type(), "string")
@@ -53,6 +92,8 @@ def _profile_column(series: pl.Series, row_count: int) -> ColumnProfile:
         min_val = str(series.min())
         max_val = str(series.max())
 
+    hints = _column_hints(series.name, dtype, distinct_count, row_count)
+
     return ColumnProfile(
         name=series.name,
         polars_dtype=str(dtype),
@@ -63,11 +104,12 @@ def _profile_column(series: pl.Series, row_count: int) -> ColumnProfile:
         sample_values=sample_values,
         min=min_val,
         max=max_val,
-        hints=[],
+        hints=hints,
     )
 
 
 def profile_dataframe(df: pl.DataFrame, table_name: str) -> TableProfile:
     row_count = df.height
     columns = [_profile_column(df[col], row_count) for col in df.columns]
-    return TableProfile(table_name=table_name, row_count=row_count, columns=columns, hints=[])
+    hints = _table_hints(df.columns)
+    return TableProfile(table_name=table_name, row_count=row_count, columns=columns, hints=hints)
