@@ -96,6 +96,11 @@ mcp: FastMCP = FastMCP(
         "  9. Call SimBI.emit_report with pbip_path pointing to the .pbip.\n"
         "     emit_report writes any measures still missing from the\n"
         "     SemanticModel (idempotent — step 5 already wrote most of it).\n"
+        "     Do NOT skip step 5 and jump here directly: any table with no\n"
+        "     .tmdl yet gets silently created with NO data connection. If you\n"
+        "     see that warning in emit_report's own return value, go back and\n"
+        "     call write_semantic_model with the full TMDL (including the\n"
+        "     partition), then call emit_report again.\n"
         " 10. Open the .pbip fresh in Power BI Desktop. Visuals render immediately\n"
         "     but show empty data — use Home → Transform data to connect the CSV.\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -420,27 +425,26 @@ async def emit_report(
     pbip_path: str,
     theme_path: str | None = None,
 ) -> str:
-    """Render annotated HTML in headless Chrome and write the .Report folder beside an existing .pbip.
+    """Render annotated HTML in headless Chrome; write the .Report folder beside an existing .pbip.
 
-    Workflow: get_vocabulary → write HTML → validate_mockup_html (after every
-    edit) → this tool.
+    Workflow: write_semantic_model (new tables/measures) → get_vocabulary →
+    write HTML → validate_mockup_html (after every edit) → this tool.
 
     Args:
-      html: annotated HTML. ALL pages in ONE call — wrap each page's visuals in
-        <div data-pbi-page="Name"> containers. NEVER call once per page; every
-        call replaces the previous .Report pages.
+      html: annotated HTML. ALL pages in ONE call — wrap each page in
+        <div data-pbi-page="Name">; calling once per page replaces prior pages.
       schema_json: JSON string from parse_schema.
-      pbip_path: EXISTING .pbip file, or a folder containing exactly one.
+      pbip_path: EXISTING .pbip file, or a folder with exactly one.
         SimBI never creates .pbip projects.
       theme_path: optional partial PBIR theme JSON; deep-merges onto SimBI's
-        default (pass only dataColors to rebrand).
+        default (pass dataColors to rebrand).
 
-    PREREQUISITE: Power BI Desktop MUST be CLOSED (it silently ignores .Report
-    writes while open). Measures in the schema are written into the
-    .SemanticModel automatically.
+    PREREQUISITE: Power BI Desktop MUST be CLOSED (ignores .Report writes
+    while open). A schema table with no .tmdl yet is created here with NO
+    data connection (warned in the return) — call write_semantic_model first.
 
-    Returns a multi-line report: first line is the .Report path, then preview
-    PNG paths (HTML render, not Power BI), transferred styling, and warnings.
+    Returns a multi-line report: .Report path, then preview PNGs (HTML
+    render, not Power BI), transferred styling, and warnings.
     """
     pbip = _resolve_pbip(pbip_path)
     schema = sanitize_schema(ModelSchema.model_validate_json(schema_json))
@@ -461,14 +465,15 @@ async def emit_report(
     # This check reads the TMDL and skips silently when measures are already
     # present, so Path 2 (measures written by the MS Power BI MCP) is untouched.
     semantic_model_dir = pbip.parent / f"{pbip.stem}.SemanticModel"
+    patch_warnings: list[str] = []
     if semantic_model_dir.exists():
         # Rename any reserved-named table the upstream authoring tool (Power BI
         # MCP / Desktop) wrote — e.g. "Measures" — BEFORE patching measures, so
         # the patcher sees the renamed file (measures already present) and the
         # model matches the report SimBI emitted from the sanitized schema.
         sanitize_semantic_model_dir(semantic_model_dir)
-        patch_semantic_model_measures(schema, semantic_model_dir)
-    return _format_emit_result(result, validator_warnings)
+        patch_warnings = patch_semantic_model_measures(schema, semantic_model_dir)
+    return _format_emit_result(result, validator_warnings + patch_warnings)
 
 
 def main() -> None:

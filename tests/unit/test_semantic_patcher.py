@@ -180,6 +180,64 @@ class TestRegisterRefTables:
         tmdl_path = tmp_path / "definition" / "tables" / "MacroData.tmdl"
         assert tmdl_path.exists()
 
+
+class TestNoDataConnectionWarning:
+    """A blank-table fallback (_build_minimal_tmdl) creates columns/measures
+    with NO partition — the table has no connection to any actual data source.
+    This is silent and easy to miss (visuals render, just empty), and it's
+    exactly the state a caller ends up in if they skip write_semantic_model
+    and let emit_report create the table for them. The caller must be told."""
+
+    def test_warns_when_creating_new_table(self, tmp_path):
+        sm = _scaffold_semantic_model(tmp_path)
+        schema = _make_schema("Economic Data", "GDP Value")
+
+        warnings = patch_semantic_model_measures(schema, sm)
+
+        assert len(warnings) == 1
+        assert "Economic Data" in warnings[0]
+        assert "no data source" in warnings[0].lower() or "no data connected" in warnings[0].lower()
+        assert "write_semantic_model" in warnings[0]
+
+    def test_no_warning_when_table_already_exists(self, tmp_path):
+        sm = _scaffold_semantic_model(tmp_path)
+        tmdl_path = sm / "definition" / "tables" / "MacroData.tmdl"
+        tmdl_path.write_text(
+            "table MacroData\n\tlineageTag: abc\n\n\tpartition MacroData = m\n\t\tmode: import\n",
+            encoding="utf-8",
+        )
+        schema = _make_schema("MacroData", "GDP Growth %")
+
+        warnings = patch_semantic_model_measures(schema, sm)
+
+        assert warnings == []
+
+    def test_no_warning_when_no_measures(self, tmp_path):
+        sm = _scaffold_semantic_model(tmp_path)
+        schema = ModelSchema(tables=[], measures=[], relationships=[])
+
+        warnings = patch_semantic_model_measures(schema, sm)
+
+        assert warnings == []
+
+    def test_one_warning_per_newly_created_table(self, tmp_path):
+        sm = _scaffold_semantic_model(tmp_path)
+        schema = ModelSchema(
+            tables=[ModelTable(name="MacroData", columns=[]), ModelTable(name="Years", columns=[])],
+            measures=[
+                ModelMeasure(name="GDP", table="MacroData", expression="AVERAGE(MacroData[Value])", return_type="number"),
+                ModelMeasure(name="Year Count", table="Years", expression="COUNTROWS(Years)", return_type="integer"),
+            ],
+            relationships=[],
+        )
+
+        warnings = patch_semantic_model_measures(schema, sm)
+
+        assert len(warnings) == 2
+        assert any("MacroData" in w for w in warnings)
+        assert any("Years" in w for w in warnings)
+
+
 class TestRepairCorruptedDaxPartition:
     """A previous session may have written `partition X = dax` (a fictional
     PartitionSourceType) and deleted the mode line, per a wrong lint message.
