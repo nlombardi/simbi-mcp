@@ -9,15 +9,22 @@ resources/PowerBI_Files/Starter Report/.../tables/Parameter.tmdl and
 """
 from __future__ import annotations
 
+import re
 import uuid
 
 from simbi_mcp.types import FieldParameter
+
+
+def _quote_name(name: str) -> str:
+    """Quote a TMDL object-header name only when it contains whitespace."""
+    return f"'{name}'" if re.search(r"\s", name) else name
 
 
 def build_field_param_tmdl(
     fp: FieldParameter, measure_tables: dict[str, str] | None = None
 ) -> str:
     n = fp.name
+    qn = _quote_name(n)
 
     def _nameof(m: str) -> str:
         tbl = (measure_tables or {}).get(m)
@@ -30,10 +37,10 @@ def build_field_param_tmdl(
     def tag() -> str:
         return str(uuid.uuid4())
 
-    return f"""table {n}
+    return f"""table {qn}
 \tlineageTag: {tag()}
 
-\tcolumn {n}
+\tcolumn {qn}
 \t\tlineageTag: {tag()}
 \t\tsummarizeBy: none
 \t\tsourceColumn: [Value1]
@@ -68,7 +75,7 @@ def build_field_param_tmdl(
 
 \t\tannotation SummarizationSetBy = Automatic
 
-\tpartition {n} = calculated
+\tpartition {qn} = calculated
 \t\tmode: import
 \t\tsource =
 \t\t\t\t{{

@@ -62,6 +62,23 @@ def test_build_field_param_tmdl_unique_lineage_tags() -> None:
     assert len(tags) == len(set(tags)) >= 4
 
 
+def test_build_field_param_tmdl_quotes_multiword_name() -> None:
+    # Same header-quoting rule as tables/columns: a multi-word field-param
+    # name must be quoted in `table`/`column`/`partition` headers or Power BI
+    # Desktop fails to parse it ("invalid token" after the object name).
+    fp = FieldParameter(name="Key Indicator", measures=["Real GDP"])
+    tmdl = build_field_param_tmdl(fp)
+    assert "table 'Key Indicator'" in tmdl
+    assert "table Key Indicator\n" not in tmdl
+    assert "column 'Key Indicator'\n" in tmdl
+    assert "column Key Indicator\n" not in tmdl
+    assert "partition 'Key Indicator' = calculated" in tmdl
+    assert "partition Key Indicator = calculated" not in tmdl
+    # The already-space-bearing '<n> Fields'/'<n> Order' columns still work.
+    assert "column 'Key Indicator Fields'" in tmdl
+    assert "column 'Key Indicator Order'" in tmdl
+
+
 def test_patch_field_parameters_creates_tmdl_and_ref(tmp_path: Path) -> None:
     tables = tmp_path / "definition" / "tables"
     tables.mkdir(parents=True)
@@ -74,6 +91,18 @@ def test_patch_field_parameters_creates_tmdl_and_ref(tmp_path: Path) -> None:
     tmdl = (tables / "Indicator.tmdl").read_text(encoding="utf-8")
     assert "NAMEOF([Real GDP])" in tmdl
     assert "ref table Indicator" in model.read_text(encoding="utf-8")
+
+
+def test_patch_field_parameters_quotes_multiword_ref(tmp_path: Path) -> None:
+    tables = tmp_path / "definition" / "tables"
+    tables.mkdir(parents=True)
+    model = tmp_path / "definition" / "model.tmdl"
+    model.write_text("model Model\n", encoding="utf-8")
+
+    fp = FieldParameter(name="Key Indicator", measures=["Real GDP"])
+    patch_field_parameters([fp], tmp_path)
+
+    assert "ref table 'Key Indicator'" in model.read_text(encoding="utf-8")
 
 
 def test_patch_field_parameters_idempotent(tmp_path: Path) -> None:
