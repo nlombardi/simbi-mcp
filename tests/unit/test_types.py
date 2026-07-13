@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from simbi_mcp.types import (
     ColumnProfile,
     DataSourceProfile,
@@ -89,8 +91,5 @@ def test_models_are_frozen() -> None:
         name="Region", polars_dtype="String", tmdl_type="string",
         null_count=0, null_pct=0.0, distinct_count=4, sample_values=[],
     )
-    try:
+    with pytest.raises(Exception):
         col.name = "Other"  # type: ignore[misc]
-        assert False, "expected a validation error on mutating a frozen model"
-    except Exception:
-        pass
