@@ -14,7 +14,7 @@ from pathlib import Path
 import fastexcel
 import polars as pl
 
-from simbi_mcp.types import ColumnProfile, TableProfile
+from simbi_mcp.types import ColumnProfile, DataSourceProfile, TableProfile
 
 _DTYPE_TO_TMDL: dict[type, str] = {
     pl.Int8: "int64",
@@ -146,3 +146,29 @@ def profile_excel(path: Path, sheet: str | None = None) -> list[TableProfile]:
         df = reader.load_sheet(name).to_polars()
         tables.append(profile_dataframe(df, name))
     return tables
+
+
+_SUPPORTED_EXTENSIONS = (".csv", ".xlsx")
+
+
+def profile_file(path: str, sheet: str | None = None) -> DataSourceProfile:
+    file_path = Path(path)
+    if not file_path.exists():
+        raise ValueError(f"File not found: {path}")
+
+    suffix = file_path.suffix.lower()
+    if suffix == ".csv":
+        tables = [profile_csv(file_path)]
+    elif suffix == ".xlsx":
+        tables = profile_excel(file_path, sheet)
+    elif suffix == ".xls":
+        raise ValueError(
+            f"Legacy .xls is not supported (got {path}) — save as .xlsx and retry."
+        )
+    else:
+        raise ValueError(
+            f"Unsupported file type {suffix!r} (got {path}) — "
+            f"analyze_data_source only supports {_SUPPORTED_EXTENSIONS}."
+        )
+
+    return DataSourceProfile(source_path=str(file_path), tables=tables)
