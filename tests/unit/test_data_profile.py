@@ -15,6 +15,7 @@ from simbi_mcp.semantic.data_profile import (
     profile_csv,
     profile_dataframe,
     profile_excel,
+    profile_file,
 )
 from simbi_mcp.types import ColumnProfile
 
@@ -243,3 +244,41 @@ def test_profile_excel_corrupted_file_raises(tmp_path: Path) -> None:
     corrupted.write_bytes(b"this is not a real xlsx file")
     with pytest.raises(ValueError, match="Could not read Excel"):
         profile_excel(corrupted)
+
+
+def test_profile_file_csv(fixtures_datasets: Path) -> None:
+    csv_path = fixtures_datasets / "sales_small.csv"
+    profile = profile_file(str(csv_path))
+    assert profile.source_path == str(csv_path)
+    assert len(profile.tables) == 1
+    assert profile.tables[0].table_name == "sales_small"
+
+
+def test_profile_file_xlsx(multi_sheet_xlsx: Path) -> None:
+    profile = profile_file(str(multi_sheet_xlsx))
+    assert [t.table_name for t in profile.tables] == ["Orders", "Notes"]
+
+
+def test_profile_file_xlsx_with_sheet_filter(multi_sheet_xlsx: Path) -> None:
+    profile = profile_file(str(multi_sheet_xlsx), sheet="Orders")
+    assert len(profile.tables) == 1
+    assert profile.tables[0].table_name == "Orders"
+
+
+def test_profile_file_missing_file_raises() -> None:
+    with pytest.raises(ValueError, match="File not found"):
+        profile_file("does_not_exist_anywhere.csv")
+
+
+def test_profile_file_unsupported_extension_raises(tmp_path: Path) -> None:
+    bad_file = tmp_path / "data.txt"
+    bad_file.write_text("hello", encoding="utf-8")
+    with pytest.raises(ValueError, match=r"\.csv.*\.xlsx|\.xlsx.*\.csv"):
+        profile_file(str(bad_file))
+
+
+def test_profile_file_xls_gets_clear_unsupported_message(tmp_path: Path) -> None:
+    bad_file = tmp_path / "legacy.xls"
+    bad_file.write_text("not a real xls", encoding="utf-8")
+    with pytest.raises(ValueError, match=r"(?i)not supported"):
+        profile_file(str(bad_file))
