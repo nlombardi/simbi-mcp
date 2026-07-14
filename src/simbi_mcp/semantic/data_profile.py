@@ -9,6 +9,7 @@ null/uniqueness stats, sample values) it would otherwise have to guess.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import polars as pl
 
@@ -113,3 +114,11 @@ def profile_dataframe(df: pl.DataFrame, table_name: str) -> TableProfile:
     columns = [_profile_column(df[col], row_count) for col in df.columns]
     hints = _table_hints(df.columns)
     return TableProfile(table_name=table_name, row_count=row_count, columns=columns, hints=hints)
+
+
+def profile_csv(path: Path) -> TableProfile:
+    try:
+        df = pl.read_csv(path, try_parse_dates=True)
+    except Exception as exc:
+        raise ValueError(f"Could not read CSV file {path}: {exc}") from exc
+    return profile_dataframe(df, path.stem)

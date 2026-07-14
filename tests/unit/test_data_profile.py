@@ -1,6 +1,8 @@
 """Tests for CSV/Excel structure profiling (analyze_data_source's core)."""
 from __future__ import annotations
 
+from pathlib import Path
+
 import polars as pl
 import pytest
 
@@ -8,6 +10,7 @@ from simbi_mcp.semantic.data_profile import (
     _column_hints,
     _map_dtype_to_tmdl,
     _table_hints,
+    profile_csv,
     profile_dataframe,
 )
 from simbi_mcp.types import ColumnProfile
@@ -139,3 +142,47 @@ def test_wide_format_hint_does_not_fire_for_normal_columns() -> None:
 
 def test_wide_format_hint_requires_at_least_three_period_columns() -> None:
     assert _table_hints(["Indicator", "2023", "2024"]) == []
+
+
+@pytest.fixture
+def fixtures_datasets() -> Path:
+    return Path(__file__).parent.parent / "fixtures" / "datasets"
+
+
+def test_profile_csv_row_count_and_table_name(fixtures_datasets: Path) -> None:
+    profile = profile_csv(fixtures_datasets / "sales_small.csv")
+    assert profile.table_name == "sales_small"
+    assert profile.row_count == 50
+
+
+def test_profile_csv_primary_key_hint(fixtures_datasets: Path) -> None:
+    profile = profile_csv(fixtures_datasets / "sales_small.csv")
+    order_id = _find(profile.columns, "OrderID")
+    assert order_id.tmdl_type == "int64"
+    assert "likely primary key" in order_id.hints
+
+
+def test_profile_csv_date_hint(fixtures_datasets: Path) -> None:
+    # try_parse_dates=True is required for this to fire — polars otherwise
+    # leaves ISO date strings as plain text, silently defeating the hint.
+    profile = profile_csv(fixtures_datasets / "sales_small.csv")
+    order_date = _find(profile.columns, "OrderDate")
+    assert order_date.tmdl_type == "dateTime"
+    assert "time-intelligence candidate" in order_date.hints
+
+
+def test_profile_csv_dimension_hint(fixtures_datasets: Path) -> None:
+    profile = profile_csv(fixtures_datasets / "sales_small.csv")
+    region = _find(profile.columns, "Region")
+    assert region.distinct_count == 4
+    assert "dimension/slicer candidate" in region.hints
+
+
+def test_profile_csv_no_wide_format_false_positive(fixtures_datasets: Path) -> None:
+    profile = profile_csv(fixtures_datasets / "sales_small.csv")
+    assert profile.hints == []
+
+
+def test_profile_csv_missing_file_raises(fixtures_datasets: Path) -> None:
+    with pytest.raises(ValueError, match="Could not read CSV"):
+        profile_csv(fixtures_datasets / "does_not_exist.csv")
