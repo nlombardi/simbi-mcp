@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from pydantic import ValidationError
 
 from simbi_mcp.types import (
     ColumnProfile,
@@ -91,5 +92,5 @@ def test_models_are_frozen() -> None:
         name="Region", polars_dtype="String", tmdl_type="string",
         null_count=0, null_pct=0.0, distinct_count=4, sample_values=[],
     )
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         col.name = "Other"  # type: ignore[misc]
