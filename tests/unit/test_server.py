@@ -200,3 +200,22 @@ async def test_emit_report_docstring_points_to_vocabulary() -> None:
     emit = next(t for t in tools if t.name == "emit_report")
     assert "get_vocabulary" in (emit.description or "")
     assert "columnChart" not in (emit.description or ""), "stale vocab list must be gone"
+
+
+async def test_analyze_data_source_tool_profiles_csv() -> None:
+    import json
+    from pathlib import Path
+
+    csv_path = Path(__file__).parent.parent / "fixtures" / "datasets" / "sales_small.csv"
+    _, result = await mcp.call_tool("analyze_data_source", {"path": str(csv_path)})
+    data = json.loads(result["result"])
+    assert data["tables"][0]["table_name"] == "sales_small"
+    order_id = next(c for c in data["tables"][0]["columns"] if c["name"] == "OrderID")
+    assert "likely primary key" in order_id["hints"]
+
+
+async def test_analyze_data_source_tool_raises_on_missing_file() -> None:
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    with pytest.raises(ToolError, match="File not found"):
+        await mcp.call_tool("analyze_data_source", {"path": "nope.csv"})

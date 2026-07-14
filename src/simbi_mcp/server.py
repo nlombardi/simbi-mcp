@@ -1,6 +1,7 @@
 """SimBI MCP server — exposes Phase 1-3 pipelines as MCP tools.
 
 Tools (typical call order):
+  analyze_data_source    CSV/Excel path → structure profile JSON (Path 1, before authoring TMDL)
   write_semantic_model   TMDL str + pbip_path → persists tables/measures (Path 1 only)
   parse_schema           TMDL str → ModelSchema JSON
   get_theme_schema       () → theme_path JSON schema (call before writing a custom theme)
@@ -27,6 +28,7 @@ from simbi_mcp.pbir.model_writer import write_semantic_model as _write_semantic_
 from simbi_mcp.pbir.reserved_names import sanitize_schema, sanitize_semantic_model_dir
 from simbi_mcp.pbir.semantic_patcher import patch_semantic_model_measures
 from simbi_mcp.pbir.theme import build_theme_schema_text
+from simbi_mcp.semantic.data_profile import profile_file
 from simbi_mcp.semantic.schema_reader import parse_tmdl_schema
 from simbi_mcp.types import ModelSchema
 
@@ -43,13 +45,13 @@ mcp: FastMCP = FastMCP(
         "  1. The user must first create a blank .pbip in Power BI Desktop\n"
         "     (File → New → File → Save As → Power BI Project format) and\n"
         "     then CLOSE Power BI Desktop.\n"
-        "  2. INSPECT THE SOURCE BEFORE WRITING ANY DAX. Open the CSV/Excel\n"
-        "     and confirm:\n"
-        "       - Exact column names and dtypes (case-sensitive). Do not guess.\n"
-        "       - SHAPE: long (one row per fact, single value column with a\n"
-        "         key column like Year/Period) vs WIDE (one column per period,\n"
-        "         e.g. [2024], [2025], [2026]). Most economic / financial\n"
-        "         exports are WIDE.\n"
+        "  2. INSPECT THE SOURCE BEFORE WRITING ANY DAX. Call\n"
+        "     SimBI.analyze_data_source(path) — do NOT open the CSV/Excel with\n"
+        "     a generic file tool, and do NOT guess column names/dtypes.\n"
+        "       - Use the returned column names and TMDL types exactly as given.\n"
+        "       - SHAPE: check the table-level hints for a WIDE-format warning\n"
+        "         (one column per period, e.g. [2024], [2025], [2026]). Most\n"
+        "         economic / financial exports are WIDE.\n"
         "       - If WIDE: your TMDL MUST include an unpivoted table (Power\n"
         "         Query M `Table.UnpivotOtherColumns`) producing Year + Value\n"
         "         columns. Then aggregate Value with a FILTER on Year. Do NOT\n"
@@ -279,6 +281,28 @@ def _format_emit_result(result: EmitResult, validator_warnings: list[str]) -> st
 def annotation_vocabulary() -> str:
     """HTML annotation vocabulary and CSS class catalog for dashboard mockups."""
     return ANNOTATION_SPEC_TEXT + "\n" + CSS_CLASS_CATALOG
+
+
+@mcp.tool()
+def analyze_data_source(path: str, sheet: str | None = None) -> str:
+    """Profile a CSV/Excel file's structure before authoring TMDL.
+
+    Call this before writing table/column TMDL for a data source you haven't
+    inspected yet — do NOT ask the user to describe columns, and do NOT try
+    to open the file with a generic file-reading tool (binary .xlsx fails).
+
+    Args:
+      path: path to a .csv or .xlsx file.
+      sheet: for multi-sheet .xlsx, optionally restrict to one sheet name.
+        Omit to profile every sheet in the workbook.
+
+    Returns a JSON report: one entry per table (sheet, or the CSV itself),
+    each with row count and per-column name/TMDL type/null stats/distinct
+    count/sample values/hints (likely primary key, date/time-intelligence
+    candidate, dimension vs. high-cardinality). A table-level hint flags
+    WIDE format (e.g. columns 2023/2024/2025) needing an unpivot.
+    """
+    return profile_file(path, sheet).model_dump_json()
 
 
 @mcp.tool()
