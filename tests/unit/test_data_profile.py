@@ -1,8 +1,10 @@
 """Tests for CSV/Excel structure profiling (analyze_data_source's core)."""
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
+import openpyxl
 import polars as pl
 import pytest
 
@@ -12,6 +14,7 @@ from simbi_mcp.semantic.data_profile import (
     _table_hints,
     profile_csv,
     profile_dataframe,
+    profile_excel,
 )
 from simbi_mcp.types import ColumnProfile
 
@@ -186,3 +189,57 @@ def test_profile_csv_no_wide_format_false_positive(fixtures_datasets: Path) -> N
 def test_profile_csv_missing_file_raises(fixtures_datasets: Path) -> None:
     with pytest.raises(ValueError, match="Could not read CSV"):
         profile_csv(fixtures_datasets / "does_not_exist.csv")
+
+
+@pytest.fixture
+def multi_sheet_xlsx(tmp_path: Path) -> Path:
+    path = tmp_path / "multi.xlsx"
+    workbook = openpyxl.Workbook()
+
+    orders = workbook.active
+    orders.title = "Orders"
+    orders.append(["OrderID", "OrderDate", "Region"])
+    orders.append([1, date(2025, 1, 1), "North"])
+    orders.append([2, date(2025, 1, 2), "South"])
+    orders.append([3, date(2025, 1, 3), "East"])
+
+    notes = workbook.create_sheet("Notes")
+    notes.append(["Comment"])
+    notes.append(["first comment"])
+    notes.append(["second comment"])
+
+    workbook.save(path)
+    return path
+
+
+def test_profile_excel_reads_every_sheet_by_default(multi_sheet_xlsx: Path) -> None:
+    tables = profile_excel(multi_sheet_xlsx)
+    assert [t.table_name for t in tables] == ["Orders", "Notes"]
+    assert tables[0].row_count == 3
+    assert [c.name for c in tables[0].columns] == ["OrderID", "OrderDate", "Region"]
+
+
+def test_profile_excel_filters_to_requested_sheet(multi_sheet_xlsx: Path) -> None:
+    tables = profile_excel(multi_sheet_xlsx, sheet="Notes")
+    assert len(tables) == 1
+    assert tables[0].table_name == "Notes"
+    assert tables[0].row_count == 2
+
+
+def test_profile_excel_unknown_sheet_raises(multi_sheet_xlsx: Path) -> None:
+    with pytest.raises(ValueError, match=r"Orders.*Notes|Notes.*Orders"):
+        profile_excel(multi_sheet_xlsx, sheet="DoesNotExist")
+
+
+def test_profile_excel_date_column_gets_hint(multi_sheet_xlsx: Path) -> None:
+    tables = profile_excel(multi_sheet_xlsx, sheet="Orders")
+    order_date = _find(tables[0].columns, "OrderDate")
+    assert order_date.tmdl_type == "dateTime"
+    assert "time-intelligence candidate" in order_date.hints
+
+
+def test_profile_excel_corrupted_file_raises(tmp_path: Path) -> None:
+    corrupted = tmp_path / "corrupted.xlsx"
+    corrupted.write_bytes(b"this is not a real xlsx file")
+    with pytest.raises(ValueError, match="Could not read Excel"):
+        profile_excel(corrupted)

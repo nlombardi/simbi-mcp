@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import fastexcel
 import polars as pl
 
 from simbi_mcp.types import ColumnProfile, TableProfile
@@ -122,3 +123,26 @@ def profile_csv(path: Path) -> TableProfile:
     except Exception as exc:
         raise ValueError(f"Could not read CSV file {path}: {exc}") from exc
     return profile_dataframe(df, path.stem)
+
+
+def profile_excel(path: Path, sheet: str | None = None) -> list[TableProfile]:
+    try:
+        reader = fastexcel.read_excel(path)
+    except Exception as exc:
+        raise ValueError(f"Could not read Excel file {path}: {exc}") from exc
+
+    sheet_names = list(reader.sheet_names)
+    if sheet is not None:
+        if sheet not in sheet_names:
+            raise ValueError(
+                f"Sheet {sheet!r} not found in {path}; available sheets: {sheet_names}"
+            )
+        names_to_read = [sheet]
+    else:
+        names_to_read = sheet_names
+
+    tables = []
+    for name in names_to_read:
+        df = reader.load_sheet(name).to_polars()
+        tables.append(profile_dataframe(df, name))
+    return tables
