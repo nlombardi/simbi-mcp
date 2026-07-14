@@ -9,6 +9,7 @@ dependencies = [
     "python-dotenv>=1.0",
     "playwright>=1.40",
     "polars>=1.0",
+    "fastexcel[polars]>=0.12",
 ]
 
 [project.optional-dependencies]
@@ -43,3 +44,12 @@ select = ["E", "F", "I", "B", "UP", "RUF"]
 [tool.mypy]
 strict = true
 python_version = "3.11"
+
+[[tool.mypy.overrides]]
+module = "fastexcel.*"
+ignore_missing_imports = true
+
+[dependency-groups]
+dev = [
+    "openpyxl>=3.1",
+]
