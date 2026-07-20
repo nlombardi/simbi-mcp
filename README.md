@@ -380,7 +380,7 @@ src/simbi_mcp/
 
 ## Supported visual types
 
-SimBI emits **28 Power BI visual types**. The most common six are below; for the full list including data-role contracts and PBIR visualType strings, see [docs/chart-catalog.md](docs/chart-catalog.md) and the implementation-status overlay in [docs/simbi-visual-roadmap.md](docs/simbi-visual-roadmap.md).
+SimBI supports **33 HTML annotation visual types** (which map to 32 Power BI visual kinds). The most common six are below; for the full list including data-role contracts and PBIR visualType strings, see [docs/chart-catalog.md](docs/chart-catalog.md) and the implementation-status overlay in [docs/simbi-visual-roadmap.md](docs/simbi-visual-roadmap.md).
 
 | Annotation | Power BI visual | Required fields |
 |---|---|---|
@@ -391,7 +391,60 @@ SimBI emits **28 Power BI visual types**. The most common six are below; for the
 | `slicer` | Button slicer | `data-pbi-field` |
 | `table` | Table | `data-pbi-columns` (comma-separated — each token is either a bare measure name or a `Table[Column]` ref) |
 
-Also supported: `multiRowCard`, `kpi`, `gauge`, `clusteredColumnChart`, `clusteredBarChart`, `hundredPercentStackedColumnChart`, `hundredPercentStackedBarChart`, `dotPlot`, `areaChart`, `comboChart`, `pieChart`, `donutChart`, `treemap`, `funnelChart`, `histogram`, `scatterChart`, `bubbleChart`, `waterfallChart`, `ribbonChart`, `map`, `filledMap`, `shapeMap`.
+Also supported: `multiRowCard`, `kpi`, `gauge`, `clusteredColumnChart`, `clusteredBarChart`, `hundredPercentStackedColumnChart`, `hundredPercentStackedBarChart`, `dotPlot`, `areaChart`, `comboChart`, `pieChart`, `donutChart`, `treemap`, `funnelChart`, `histogram`, `scatterChart`, `bubbleChart`, `waterfallChart`, `ribbonChart`, `map`, `filledMap`, `shapeMap`, `field-param`, `shape`, `text`, `button`, `bookmark`.
+
+## Advanced interactive & layout features
+
+SimBI supports several advanced Power BI interactive features directly via HTML annotations:
+
+### Interactive Bookmarks & Buttons
+Use buttons and bookmarks to create layout toggles, tab navigation, or show/hide specific charts dynamically:
+- **Starting Hidden**: Any visual can start hidden by specifying `data-pbi-hidden="true"`.
+- **Bookmarks**: Declare a bookmark metadata node using `data-pbi="bookmark"` with a display name `data-pbi-name="View: Chart"`. Use optional attributes `data-pbi-visible="visualId1,visualId2"` and `data-pbi-hidden="visualId3"` (matching target elements carrying `data-pbi-id="visualId1"`) to define what is shown/hidden when triggered.
+- **Buttons**: Create action buttons with `data-pbi="button"`, `data-pbi-action="bookmark"`, and `data-pbi-bookmark="View: Chart"`.
+
+```html
+<!-- Chart that is visible by default -->
+<div data-pbi="columnChart" data-pbi-id="chartColumn" ...></div>
+
+<!-- Chart that is hidden by default -->
+<div data-pbi="lineChart" data-pbi-id="chartLine" data-pbi-hidden="true" ...></div>
+
+<!-- Bookmark states -->
+<div data-pbi="bookmark" data-pbi-name="Show Column" data-pbi-visible="chartColumn" data-pbi-hidden="chartLine"></div>
+<div data-pbi="bookmark" data-pbi-name="Show Line" data-pbi-visible="chartLine" data-pbi-hidden="chartColumn"></div>
+
+<!-- Trigger buttons -->
+<button data-pbi="button" data-pbi-action="bookmark" data-pbi-bookmark="Show Column">Show Column Chart</button>
+<button data-pbi="button" data-pbi-action="bookmark" data-pbi-bookmark="Show Line">Show Line Chart</button>
+```
+
+### Field Parameters
+Field parameters allow users to dynamically change the measures shown in charts or tables:
+- **Field Parameter Slicer**: Declare the parameter table/slicer using `data-pbi="field-param"`, defining the parameter name with `data-pbi-param-name="MeasureSwitcher"` and the comma-separated measures it switches between with `data-pbi-measures="Total Revenue,Order Count"`.
+- **Binding Charts**: Bind a chart's values role to the field parameter by specifying `data-pbi-values-param="MeasureSwitcher"`.
+
+```html
+<!-- Field parameter selection slicer -->
+<div data-pbi="field-param" data-pbi-param-name="MeasureSwitcher" data-pbi-measures="Total Revenue,Order Count"></div>
+
+<!-- Chart that swaps Y-axis value dynamically -->
+<div data-pbi="columnChart" data-pbi-axis="sales[Region]" data-pbi-values-param="MeasureSwitcher"></div>
+```
+
+### Dynamic Text Boxes
+Text boxes can display dynamic measure values (e.g. showing selected slicer context in a dashboard title):
+- Use `data-pbi="text"` with `data-pbi-title-measure="<MeasureName>"` to bind the textbox content to a DAX measure. Use `data-pbi-text` as the static fallback preview text.
+- Text role styling can be specified via `data-pbi-role="title|subtitle|label|tab"`.
+
+```html
+<div data-pbi="text" data-pbi-text="Sales Dashboard" data-pbi-title-measure="SelectedRegionTitle" data-pbi-role="title"></div>
+```
+
+### Shapes & Static Styling
+Use static shapes for background bands, cards, separators, and card styling overrides:
+- **Shapes**: Create basic rectangles or lines using `data-pbi="shape"` with `data-pbi-shape="rectangle|line"`.
+- **CSS Styles Transfer**: SimBI reads computed CSS properties (`background-color`, `border`, `border-radius`, `box-shadow`) and maps them to shape geometry or visual containers. Overwrite report-wide theme settings per-element by setting inline styles or overriding attributes `data-pbi-fill` and `data-pbi-stroke`.
 
 ## License
 
