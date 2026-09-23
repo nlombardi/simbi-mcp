@@ -38,6 +38,14 @@ def test_build_bookmark_json_visibility():
     assert j["explorationState"]["activeSection"] == "page1"
 
 
+def test_build_bookmark_json_infers_targets_from_visible_hidden():
+    # When target is not explicitly set, targetVisualNames is inferred from visible + hidden
+    b = Bookmark(name="Toggle", captures={"visibility"}, visible=["guidA"], hidden=["guidB"])
+    j = build_bookmark_json(b, page_guid="p1", visual_types={})
+    assert j["options"]["applyOnlyToTargetVisuals"] is True
+    assert j["options"]["targetVisualNames"] == ["guidA", "guidB"]
+
+
 def test_bookmark_construction():
     b = Bookmark(
         name="View: Bar",
@@ -68,18 +76,19 @@ def test_collect_bookmarks_from_nodes():
         "data-pbi": "bookmark", "data-pbi-name": "View: Bar",
         "data-pbi-captures": "visibility",
         "data-pbi-visible": "chartBar", "data-pbi-hidden": "chartLine, chartTable",
-    })]
+    }, page_name="Overview")]
     bms = collect_bookmarks(nodes)
     assert len(bms) == 1
     assert bms[0].name == "View: Bar"
     assert bms[0].captures == {"visibility"}
     assert bms[0].visible == ["chartBar"]
     assert bms[0].hidden == ["chartLine", "chartTable"]
+    assert bms[0].page_name == "Overview"
 
 
-def test_resolve_button_actions_rewrites_visuallink():
+def test_resolve_button_actions_rewrites_action_objects() -> None:
     from simbi_mcp.pbir.emitter import resolve_button_actions
-    visuals = [{
+    visuals: list[dict[str, Any]] = [{
         "name": "btnGuid",
         "simbiButtonAction": {"type": "bookmark", "bookmark": "View: Bar"},
         "visual": {"visualType": "actionButton"},
@@ -87,15 +96,78 @@ def test_resolve_button_actions_rewrites_visuallink():
     name_to_guid = {"View: Bar": "Bookmarkabc123"}
     resolve_button_actions(visuals, name_to_guid)
     assert "simbiButtonAction" not in visuals[0]
-    vlink = visuals[0]["visual"]["visualContainerObjects"]["visualLink"][0]["properties"]
-    assert vlink["bookmark"]["expr"]["Literal"]["Value"] == "'Bookmarkabc123'"
-    assert vlink["type"]["expr"]["Literal"]["Value"] == "'Bookmark'"
+    vis: dict[str, Any] = visuals[0]["visual"]
+    action = vis["visualContainerObjects"]["visualLink"][0]["properties"]
+    assert action["bookmark"]["expr"]["Literal"]["Value"] == "'Bookmarkabc123'"
+    assert action["type"]["expr"]["Literal"]["Value"] == "'Bookmark'"
+    assert action["show"]["expr"]["Literal"]["Value"] == "true"
+    assert "action" not in vis.get("objects", {})
 
 
-def test_resolve_button_actions_nonbookmark_left_clean():
+def test_resolve_button_actions_navigation() -> None:
     from simbi_mcp.pbir.emitter import resolve_button_actions
-    visuals = [{"name": "b", "simbiButtonAction": {"type": "blank"}, "visual": {"visualType": "actionButton"}}]
-    resolve_button_actions(visuals, {})
-    # non-bookmark actions: simbiButtonAction removed, no visualLink added
+    visuals: list[dict[str, Any]] = [{
+        "name": "btnNav",
+        "simbiButtonAction": {"type": "navigate", "page": "Page 2"},
+        "visual": {"visualType": "actionButton"},
+    }]
+    page_to_guid = {"Page 2": "guidPage2"}
+    resolve_button_actions(visuals, page_name_to_guid=page_to_guid)
     assert "simbiButtonAction" not in visuals[0]
-    assert "visualContainerObjects" not in visuals[0]["visual"]
+    vis: dict[str, Any] = visuals[0]["visual"]
+    action = vis["visualContainerObjects"]["visualLink"][0]["properties"]
+    assert action["show"]["expr"]["Literal"]["Value"] == "true"
+    assert action["type"]["expr"]["Literal"]["Value"] == "'PageNavigation'"
+    assert action["navigationSection"]["expr"]["Literal"]["Value"] == "'guidPage2'"
+
+
+def test_resolve_button_actions_reset() -> None:
+    from simbi_mcp.pbir.emitter import resolve_button_actions
+    visuals: list[dict[str, Any]] = [{
+        "name": "btnReset",
+        "simbiButtonAction": {"type": "reset"},
+        "visual": {"visualType": "actionButton"},
+    }]
+    resolve_button_actions(visuals)
+    assert "simbiButtonAction" not in visuals[0]
+    vis: dict[str, Any] = visuals[0]["visual"]
+    action = vis["visualContainerObjects"]["visualLink"][0]["properties"]
+    assert action["show"]["expr"]["Literal"]["Value"] == "true"
+    assert action["type"]["expr"]["Literal"]["Value"] == "'ClearAllSlicers'"
+
+
+def test_resolve_button_actions_nonbookmark_left_clean() -> None:
+    from simbi_mcp.pbir.emitter import resolve_button_actions
+    visuals: list[dict[str, Any]] = [
+        {"name": "b", "simbiButtonAction": {"type": "blank"}, "visual": {"visualType": "actionButton"}}
+    ]
+    resolve_button_actions(visuals, {})
+    # non-bookmark actions: simbiButtonAction removed, no action added
+    assert "simbiButtonAction" not in visuals[0]
+    vis: dict[str, Any] = visuals[0]["visual"]
+    assert "visualLink" not in vis.get("visualContainerObjects", {})
+    assert "action" not in vis.get("objects", {})
+
+
+def test_multipage_bookmark_parent_page_scoping() -> None:
+    from simbi_mcp.pbir.emitter import collect_bookmarks, build_bookmark_json, resolve_targets
+    from simbi_mcp.pbir.extractor import VisualNode
+
+    nodes = [
+        VisualNode(x=0, y=0, width=10, height=10, attrs={"data-pbi": "bookmark", "data-pbi-name": "BM Page 1", "data-pbi-visible": "v1"}, page_name="Page 1"),
+        VisualNode(x=0, y=0, width=10, height=10, attrs={"data-pbi": "bookmark", "data-pbi-name": "BM Page 2", "data-pbi-visible": "v2"}, page_name="Page 2"),
+    ]
+    bms = collect_bookmarks(nodes)
+    id_to_guid = {"v1": "guid1", "v2": "guid2"}
+    page_name_to_guid = {"Page 1": "guidP1", "Page 2": "guidP2"}
+    visual_types = {"guid1": "card", "guid2": "lineChart"}
+
+    bm1_resolved = resolve_targets(bms[0], id_to_guid)
+    bj1 = build_bookmark_json(bm1_resolved, page_name_to_guid[bms[0].page_name], visual_types)
+    assert bj1["explorationState"]["activeSection"] == "guidP1"
+    assert "guidP1" in bj1["explorationState"]["sections"]
+
+    bm2_resolved = resolve_targets(bms[1], id_to_guid)
+    bj2 = build_bookmark_json(bm2_resolved, page_name_to_guid[bms[1].page_name], visual_types)
+    assert bj2["explorationState"]["activeSection"] == "guidP2"
+    assert "guidP2" in bj2["explorationState"]["sections"]

@@ -360,6 +360,7 @@ VISUAL_ATTRS: dict[VisualType, VisualSpec] = {
         "optional": {
             "data-pbi-text": '"<label>" — button label text',
             "data-pbi-bookmark": '"<Bookmark Name>" — target bookmark (required when action="bookmark")',
+            "data-pbi-page": '"<Page Name>" — target page name (required when action="navigate")',
         },
         "note": "Chrome action button, no data query.",
     },
@@ -512,6 +513,13 @@ RULES
   position.
 - Never invent a measure or column name not present in the schema.
 - Unknown or misspelled data-pbi-* attributes are a HARD ERROR.
+- View-Toggle Buttons & Selection Styling:
+  Power BI action buttons are static visual containers and do not dynamically alter CSS on click.
+  To make toggle buttons visually switch between active and inactive states upon selection:
+  pair each view option with an Active button (e.g. bold text, highlighted background) and an
+  Inactive button (e.g. regular text, neutral/outlined background), and include their data-pbi-id
+  values in the bookmarks' data-pbi-visible and data-pbi-hidden alongside the targeted charts.
+  Alternatively, style all toggle buttons with uniform neutral styling.
 """
 
 STYLING_CONTRACT_TEXT: str = """\
@@ -524,8 +532,7 @@ SimBI reads the COMPUTED CSS of every data-pbi element and transfers:
   box-shadow       -> visual drop shadow (FIRST layer only)
 On data-pbi="shape" the same properties style the SHAPE GEOMETRY instead:
   background-color (or data-pbi-fill) -> fill; border (or data-pbi-stroke)
-  -> outline; border-radius -> roundEdge. Explicit data-pbi-* attributes
-  beat CSS.
+  -> outline. Explicit data-pbi-* attributes beat CSS.
 A data-pbi-page container's background-color becomes the page background.
 NOT transferred (use theme, data-pbi-role, or data-pbi-color instead):
 color, font-*, opacity, gradients, text-align. Declaring these INLINE on a

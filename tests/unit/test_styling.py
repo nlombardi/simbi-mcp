@@ -169,7 +169,7 @@ def test_shape_fill_attr_beats_css() -> None:
     assert objs["fill"][0]["properties"]["fillColor"] == solid("#1E3A8A")
 
 
-def test_shape_outline_and_round_edge() -> None:
+def test_shape_outline_no_round_edge() -> None:
     objs, _, _ = shape_objects_from_styles(
         {
             "borderWidth": "1px", "borderStyle": "solid",
@@ -180,7 +180,7 @@ def test_shape_outline_and_round_edge() -> None:
     assert objs["outline"][0]["properties"]["show"] == literal("true")
     assert objs["outline"][1]["properties"]["lineColor"] == solid("#D4D6DA")
     assert objs["outline"][1]["selector"] == {"id": "default"}
-    assert objs["shape"][0]["properties"]["roundEdge"] == literal("8L")
+    assert "shape" not in objs
 
 
 def test_shape_no_styles_emits_nothing() -> None:

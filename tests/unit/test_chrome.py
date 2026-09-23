@@ -54,6 +54,22 @@ def test_button_blank_action(schema):
     assert r["simbiButtonAction"] == {"type": "blank"}
 
 
+def test_button_navigate_action(schema):
+    node = VisualNode(x=0, y=0, width=100, height=36, attrs={
+        "data-pbi": "button", "data-pbi-action": "navigate", "data-pbi-page": "Page 2", "data-pbi-text": "Go to P2"})
+    r = build_visual_json(node, z_order=0, schema=schema)
+    assert r["visual"]["visualType"] == "actionButton"
+    assert r["simbiButtonAction"] == {"type": "navigate", "page": "Page 2"}
+
+
+def test_button_reset_action(schema):
+    node = VisualNode(x=0, y=0, width=100, height=36, attrs={
+        "data-pbi": "button", "data-pbi-action": "reset", "data-pbi-text": "Reset"})
+    r = build_visual_json(node, z_order=0, schema=schema)
+    assert r["visual"]["visualType"] == "actionButton"
+    assert r["simbiButtonAction"] == {"type": "reset"}
+
+
 def test_theme_has_chrome_styles():
     import json
     from pathlib import Path

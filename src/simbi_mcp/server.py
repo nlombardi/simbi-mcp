@@ -417,13 +417,13 @@ def validate_mockup_html(html: str, schema_json: str) -> str:
 
 @mcp.tool()
 def get_vocabulary() -> str:
-    """Full data-pbi annotation vocabulary — call BEFORE writing mockup HTML.
+    """Full data-pbi annotation vocabulary: call BEFORE writing mockup HTML.
 
     Returns every visual type (~30) with its required AND optional attributes,
     the universal attributes (data-pbi-id, data-pbi-hidden), correct-shape
     examples, the STYLING CONTRACT (which CSS transfers to Power BI: computed
     background-color, border, border-radius, box-shadow; shapes map these to
-    fill/outline/roundEdge), and the CSS class catalog for mockup layout.
+    fill/outline), and the CSS class catalog for mockup layout.
     """
     return ANNOTATION_SPEC_TEXT + "\n" + CSS_CLASS_CATALOG
 

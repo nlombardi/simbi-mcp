@@ -14,13 +14,19 @@ registers every table in model.tmdl. Nothing reaches disk un-normalized.
 """
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from simbi_mcp.dax.linter import LintSeverity, lint_measures
 from simbi_mcp.pbir.reserved_names import safe_table_name
-from simbi_mcp.pbir.semantic_patcher import _register_ref_tables, _sanitize_tmdl
+from simbi_mcp.pbir.semantic_patcher import (
+    _register_ref_tables,
+    _sanitize_tmdl,
+    _sync_pbi_query_order,
+    _sync_ref_tables,
+)
 
 # Lint rules whose violation makes Power BI Desktop REFUSE to load the model
 # (a crash on open). These are fatal for authoring; DAX-correctness rules
@@ -28,12 +34,14 @@ from simbi_mcp.pbir.semantic_patcher import _register_ref_tables, _sanitize_tmdl
 # this call doesn't carry.
 _FATAL_LINT_RULES = frozenset(
     {
+        "table-missing-partition",
         "invalid-partition-mode",
         "invalid-partition-source",
         "calc-table-missing-sourcecolumn",
         "invalid-lineage-tag",
         "sequential-relationship-guid",
         "invalid-relationship-guid",
+        "missing-variation-relationship",
     }
 )
 
@@ -219,16 +227,139 @@ def _reindent_stray_members(text: str) -> str:
     return "\n".join(out)
 
 
+_VARIATION_HEADER_RE = re.compile(r"^(?P<indent>[ \t]*)variation\b")
+_RELATIONSHIP_PROP_RE = re.compile(r"^[ \t]*relationship:\s*(?P<guid>\S+)")
+
+
+def _strip_dangling_variations(text: str, defined_rel_ids: set[str]) -> str:
+    """Remove variation blocks whose target relationship is not defined in the model.
+
+    Power BI Desktop auto-generates `variation Variation` on date columns pointing
+    to `LocalDateTable_<guid>` via a relationship in `relationships.tmdl`. If TMDL
+    is copied or authored with a variation whose relationship is absent, Power BI
+    Desktop crashes on open with:
+    "Property Relationship of object 'variation Variation in column ...' refers to an object which cannot be found".
+
+    Stripping dangling variations leaves the column intact as a standard column
+    without broken relationship links.
+    """
+    lines = text.splitlines(keepends=True)
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        m = _VARIATION_HEADER_RE.match(line)
+        if m:
+            indent_len = len(m.group("indent").expandtabs(4))
+            block_lines = [line]
+            rel_guid: str | None = None
+            j = i + 1
+            while j < len(lines):
+                next_line = lines[j]
+                if not next_line.strip():
+                    k = j + 1
+                    deeper = False
+                    while k < len(lines):
+                        if lines[k].strip():
+                            k_indent = len(lines[k]) - len(lines[k].lstrip("\t "))
+                            k_exp = len(lines[k][:k_indent].expandtabs(4))
+                            if k_exp > indent_len:
+                                deeper = True
+                            break
+                        k += 1
+                    if deeper:
+                        block_lines.append(next_line)
+                        j += 1
+                        continue
+                    else:
+                        break
+                next_indent = len(next_line) - len(next_line.lstrip("\t "))
+                next_exp = len(next_line[:next_indent].expandtabs(4))
+                if next_exp > indent_len:
+                    rel_m = _RELATIONSHIP_PROP_RE.match(next_line)
+                    if rel_m:
+                        rel_guid = rel_m.group("guid").strip("'\"")
+                    block_lines.append(next_line)
+                    j += 1
+                else:
+                    break
+
+            if rel_guid is not None and rel_guid in defined_rel_ids:
+                out.extend(block_lines)
+            i = j
+        else:
+            out.append(line)
+            i += 1
+    return "".join(out)
+
+
+def _clean_diagram_layout(semantic_model_dir: Path, surviving_tables: set[str]) -> None:
+    """Prune deleted table nodes from diagramLayout.json if present."""
+    layout_file = semantic_model_dir / "diagramLayout.json"
+    if not layout_file.exists():
+        return
+    try:
+        data = json.loads(layout_file.read_text(encoding="utf-8"))
+        diagrams = data.get("diagrams", [])
+        changed = False
+        for d in diagrams:
+            nodes = d.get("nodes", [])
+            filtered = [n for n in nodes if n.get("nodeIndex") in surviving_tables]
+            if len(filtered) != len(nodes):
+                d["nodes"] = filtered
+                changed = True
+        if changed:
+            layout_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+_PARTITION_KEYWORD_RE = re.compile(r"^[ \t]*partition\b", re.MULTILINE)
+_COLUMN_KEYWORD_RE = re.compile(r"^[ \t]*column\b", re.MULTILINE)
+
+
+def _auto_heal_measure_partitions(text: str, table_name: str) -> str:
+    """Auto-inject a calculated partition for measure-only tables missing one.
+
+    When an agent authors a dedicated measures table (like `_Measures`), it
+    frequently omits the partition block because the table has no physical data.
+    However, Tabular Object Model (TOM) requires every table to have a partition.
+    Omitting it causes Power BI Desktop to throw:
+    'Model validation failed. A composite model cannot be used with entity based query sources'.
+
+    If a table block contains NO partition and NO columns (only measures and
+    properties), this auto-heals it with:
+        partition <name> = calculated
+            mode: import
+            source = {BLANK()}
+
+    If the table block has columns, it is not a pure measures container; we do
+    not guess its data source, letting `table-missing-partition` reject it.
+    """
+    if _PARTITION_KEYWORD_RE.search(text):
+        return text
+    if _COLUMN_KEYWORD_RE.search(text):
+        return text  # Has columns; do not auto-heal, let fatal lint rule catch it
+
+    safe_name = _quote_name(table_name)
+    partition_block = (
+        f"\n\tpartition {safe_name} = calculated\n"
+        f"\t\tmode: import\n"
+        f"\t\tsource = {{BLANK()}}\n"
+    )
+    return text.rstrip() + "\n" + partition_block
+
+
 def write_semantic_model(semantic_model_dir: Path, tmdl: str) -> dict[str, str]:
     """Persist a full agent-authored model TMDL to disk, normalized.
 
     Splits the TMDL into table/relationship blocks, rewrites reserved table names
     everywhere they appear, repairs partitions, re-indents members left at the
-    wrong depth, and refuses to write (raising ValueError) if any load-crash
-    lint rule fires OR any line uses space instead of tab indentation. On
-    success writes each table to ``tables/<name>.tmdl``, writes
-    ``relationships.tmdl`` when relationships are supplied, and registers every
-    table in ``model.tmdl``.
+    wrong depth, strips dangling variation blocks, and refuses to write (raising
+    ValueError) if any load-crash lint rule fires OR any line uses space instead
+    of tab indentation. On success writes each table to ``tables/<name>.tmdl``,
+    prunes orphan tables, writes ``relationships.tmdl``, and synchronizes
+    ``model.tmdl``.
 
     Returns the ``{old: new}`` reserved-name rename map (empty when none).
     """
@@ -247,7 +378,7 @@ def write_semantic_model(semantic_model_dir: Path, tmdl: str) -> dict[str, str]:
             raise ValueError(
                 f"Table {b.name!r} uses space indentation on line {bad_line} "
                 f"of its block, not tabs. TMDL requires literal TAB characters "
-                f"for every nesting level — table members (measure/column/"
+                f"for every nesting level: table members (measure/column/"
                 f"partition/...) one tab under 'table {b.name}', their own "
                 f"properties one tab deeper still. Power BI Desktop rejects "
                 f"space-indented TMDL with 'Invalid indentation was detected' "
@@ -255,12 +386,24 @@ def write_semantic_model(semantic_model_dir: Path, tmdl: str) -> dict[str, str]:
                 f"table's members using tabs and call write_semantic_model again."
             )
 
+    rel_blocks = [b for b in blocks if b.kind == "relationship"]
+    defined_rel_ids = {b.name for b in rel_blocks}
+
     table_blocks = [
-        ModelBlock(b.kind, b.name, _sanitize_tmdl(_reindent_stray_members(b.text)))
+        ModelBlock(
+            b.kind,
+            b.name,
+            _auto_heal_measure_partitions(
+                _strip_dangling_variations(
+                    _sanitize_tmdl(_reindent_stray_members(b.text)),
+                    defined_rel_ids,
+                ),
+                b.name,
+            ),
+        )
         for b in blocks
         if b.kind == "table"
     ]
-    rel_blocks = [b for b in blocks if b.kind == "relationship"]
 
     # Fail loudly BEFORE writing anything: a half-written model is worse than none.
     normalized = "\n\n".join(b.text.rstrip() for b in table_blocks + rel_blocks) + "\n"
@@ -271,19 +414,37 @@ def write_semantic_model(semantic_model_dir: Path, tmdl: str) -> dict[str, str]:
     ]
     if fatal:
         raise ValueError(
-            "Refusing to write semantic model — load-blocking errors:\n"
+            "Refusing to write semantic model: load-blocking errors:\n"
             + "\n".join(str(f) for f in fatal)
         )
 
     definition = semantic_model_dir / "definition"
     tables_dir = definition / "tables"
     tables_dir.mkdir(parents=True, exist_ok=True)
+
+    active_table_names = {b.name for b in table_blocks}
+
+    # Prune orphan tables left over from prior model states or starter templates.
+    # Power BI Desktop scans all .tmdl files in tables/ on startup regardless of model.tmdl;
+    # orphaned tables with broken variations/partitions cause fatal deserialization errors.
+    # DateTableTemplate_* is Power BI's internal template and is preserved.
+    for table_file in tables_dir.glob("*.tmdl"):
+        stem = table_file.stem
+        if stem not in active_table_names and not stem.startswith("DateTableTemplate_"):
+            table_file.unlink()
+
     for b in table_blocks:
         (tables_dir / f"{b.name}.tmdl").write_text(b.text, encoding="utf-8")
 
+    rel_file = definition / "relationships.tmdl"
     if rel_blocks:
         rel_text = "\n\n".join(b.text.rstrip() for b in rel_blocks) + "\n"
-        (definition / "relationships.tmdl").write_text(rel_text, encoding="utf-8")
+        rel_file.write_text(rel_text, encoding="utf-8")
+    elif rel_file.exists():
+        rel_file.write_text("\n", encoding="utf-8")
 
-    _register_ref_tables(semantic_model_dir, [b.name for b in table_blocks])
+    surviving_tables = {f.stem for f in tables_dir.glob("*.tmdl")}
+    _sync_ref_tables(semantic_model_dir, surviving_tables)
+    _sync_pbi_query_order(semantic_model_dir)
+    _clean_diagram_layout(semantic_model_dir, surviving_tables)
     return renames

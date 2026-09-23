@@ -7,12 +7,14 @@ import pytest
 
 from simbi_mcp.pbir.model_writer import (
     _apply_table_renames,
+    _auto_heal_measure_partitions,
     _detect_space_indentation,
     _reindent_stray_members,
     _reserved_renames,
     _split_model_blocks,
     write_semantic_model,
 )
+from simbi_mcp.pbir.semantic_patcher import _sync_pbi_query_order
 
 
 _FULL_MODEL_TMDL = """\
@@ -370,3 +372,273 @@ class TestWriteSemanticModelIndentation:
         with pytest.raises(ValueError, match="(?i)tab"):
             write_semantic_model(sm, tmdl)
         assert not (sm / "definition" / "tables" / "WEO.tmdl").exists()
+
+
+class TestOrphanTablePruningAndCleanup:
+    def test_prunes_orphan_tables_and_local_date_tables(self, tmp_path: Path) -> None:
+        sm = _scaffold_semantic_model(tmp_path)
+        tables_dir = sm / "definition" / "tables"
+        (tables_dir / "Countries.tmdl").write_text("table Countries\n\tlineageTag: 11111111-1111-4111-8111-111111111111\n", encoding="utf-8")
+        (tables_dir / "LocalDateTable_12345678.tmdl").write_text("table LocalDateTable_12345678\n\tlineageTag: 22222222-2222-4222-8222-222222222222\n", encoding="utf-8")
+        (tables_dir / "DateTableTemplate_abc123.tmdl").write_text("table DateTableTemplate_abc123\n\tlineageTag: 33333333-3333-4333-8333-333333333333\n", encoding="utf-8")
+
+        tmdl = (
+            "table WEO_Data\n"
+            "\tlineageTag: 44444444-4444-4444-8444-444444444444\n\n"
+            "\tcolumn Year\n\t\tdataType: int64\n"
+            "\t\tlineageTag: 55555555-5555-4555-8555-555555555555\n"
+            "\t\tsummarizeBy: none\n\t\tsourceColumn: Year\n\n"
+            "\tpartition WEO_Data = m\n\t\tmode: import\n\t\tsource = let x = 1 in x\n"
+        )
+        write_semantic_model(sm, tmdl)
+
+        assert (tables_dir / "WEO_Data.tmdl").exists()
+        assert (tables_dir / "DateTableTemplate_abc123.tmdl").exists()
+        assert not (tables_dir / "Countries.tmdl").exists()
+        assert not (tables_dir / "LocalDateTable_12345678.tmdl").exists()
+
+    def test_syncs_model_tmdl_refs(self, tmp_path: Path) -> None:
+        sm = _scaffold_semantic_model(tmp_path)
+        tables_dir = sm / "definition" / "tables"
+        (tables_dir / "DateTableTemplate_abc123.tmdl").write_text("table DateTableTemplate_abc123\n\tlineageTag: 33333333-3333-4333-8333-333333333333\n", encoding="utf-8")
+        model_tmdl = sm / "definition" / "model.tmdl"
+        model_tmdl.write_text(
+            "model Model\n\tculture: en-US\n\n"
+            "ref table DateTableTemplate_abc123\n"
+            "ref table Countries\n\n"
+            "ref cultureInfo en-US\n",
+            encoding="utf-8",
+        )
+
+        tmdl = (
+            "table WEO_Data\n"
+            "\tlineageTag: 44444444-4444-4444-8444-444444444444\n\n"
+            "\tcolumn Year\n\t\tdataType: int64\n"
+            "\t\tlineageTag: 55555555-5555-4555-8555-555555555555\n"
+            "\t\tsummarizeBy: none\n\t\tsourceColumn: Year\n\n"
+            "\tpartition WEO_Data = m\n\t\tmode: import\n\t\tsource = let x = 1 in x\n"
+        )
+        write_semantic_model(sm, tmdl)
+
+        content = model_tmdl.read_text(encoding="utf-8")
+        assert "ref table Countries" not in content
+        assert "ref table WEO_Data" in content
+        assert "ref table DateTableTemplate_abc123" in content
+
+    def test_clears_relationships_when_none_supplied(self, tmp_path: Path) -> None:
+        sm = _scaffold_semantic_model(tmp_path)
+        rel_file = sm / "definition" / "relationships.tmdl"
+        rel_file.write_text("relationship old-guid\n\tfromColumn: A.X\n\ttoColumn: B.Y\n", encoding="utf-8")
+
+        tmdl = (
+            "table WEO_Data\n"
+            "\tlineageTag: 44444444-4444-4444-8444-444444444444\n\n"
+            "\tcolumn Year\n\t\tdataType: int64\n"
+            "\t\tlineageTag: 55555555-5555-4555-8555-555555555555\n"
+            "\t\tsummarizeBy: none\n\t\tsourceColumn: Year\n\n"
+            "\tpartition WEO_Data = m\n\t\tmode: import\n\t\tsource = let x = 1 in x\n"
+        )
+        write_semantic_model(sm, tmdl)
+
+        assert rel_file.exists()
+        assert rel_file.read_text(encoding="utf-8").strip() == ""
+
+    def test_strips_dangling_variation_referencing_absent_relationship(self, tmp_path: Path) -> None:
+        sm = _scaffold_semantic_model(tmp_path)
+        tmdl = (
+            "table Countries\n"
+            "\tlineageTag: 11111111-1111-4111-8111-111111111111\n\n"
+            "\tcolumn COUNTRY_UPDATE_DATE\n"
+            "\t\tdataType: dateTime\n"
+            "\t\tformatString: Long Date\n"
+            "\t\tlineageTag: 22222222-2222-4222-8222-222222222222\n"
+            "\t\tsummarizeBy: none\n"
+            "\t\tsourceColumn: COUNTRY_UPDATE_DATE\n\n"
+            "\t\tvariation Variation\n"
+            "\t\t\tisDefault\n"
+            "\t\t\trelationship: 0c85f157-fa62-4bc9-9364-b69fbe939e03\n"
+            "\t\t\tdefaultHierarchy: LocalDateTable_eb17baf9-e61f-4097-b2ee-f6f92aee7ede.'Date Hierarchy'\n\n"
+            "\t\tannotation SummarizationSetBy = Automatic\n\n"
+            "\tpartition Countries = m\n"
+            "\t\tmode: import\n"
+            "\t\tsource = let x = 1 in x\n"
+        )
+        write_semantic_model(sm, tmdl)
+
+        body = (sm / "definition" / "tables" / "Countries.tmdl").read_text(encoding="utf-8")
+        assert "variation Variation" not in body
+        assert "0c85f157-fa62-4bc9-9364-b69fbe939e03" not in body
+        assert "column COUNTRY_UPDATE_DATE" in body
+        assert "annotation SummarizationSetBy = Automatic" in body
+
+    def test_preserves_valid_variation_referencing_defined_relationship(self, tmp_path: Path) -> None:
+        sm = _scaffold_semantic_model(tmp_path)
+        rel_guid = "9b64ea26-5cd0-4d51-a968-3e42ea2d603a"
+        tmdl = (
+            "table Orders\n"
+            "\tlineageTag: 11111111-1111-4111-8111-111111111111\n\n"
+            "\tcolumn OrderDate\n"
+            "\t\tdataType: dateTime\n"
+            "\t\tlineageTag: 22222222-2222-4222-8222-222222222222\n"
+            "\t\tsummarizeBy: none\n"
+            "\t\tsourceColumn: OrderDate\n\n"
+            "\t\tvariation Variation\n"
+            "\t\t\tisDefault\n"
+            f"\t\t\trelationship: {rel_guid}\n\n"
+            "\tpartition Orders = m\n"
+            "\t\tmode: import\n"
+            "\t\tsource = let x = 1 in x\n\n"
+            f"relationship {rel_guid}\n"
+            "\tfromColumn: Orders.OrderDate\n"
+            "\ttoColumn: Orders.OrderDate\n"
+        )
+        write_semantic_model(sm, tmdl)
+
+        body = (sm / "definition" / "tables" / "Orders.tmdl").read_text(encoding="utf-8")
+        assert "variation Variation" in body
+        assert rel_guid in body
+
+    def test_cleans_diagram_layout_nodes(self, tmp_path: Path) -> None:
+        import json
+        sm = _scaffold_semantic_model(tmp_path)
+        layout = {
+            "version": "1.1.0",
+            "diagrams": [
+                {
+                    "ordinal": 0,
+                    "nodes": [
+                        {"nodeIndex": "Countries", "nodeLineageTag": "tag-1"},
+                        {"nodeIndex": "WEO_Data", "nodeLineageTag": "tag-2"},
+                    ],
+                }
+            ],
+        }
+        (sm / "diagramLayout.json").write_text(json.dumps(layout), encoding="utf-8")
+
+        tmdl = (
+            "table WEO_Data\n"
+            "\tlineageTag: 44444444-4444-4444-8444-444444444444\n\n"
+            "\tcolumn Year\n\t\tdataType: int64\n"
+            "\t\tlineageTag: 55555555-5555-4555-8555-555555555555\n"
+            "\t\tsummarizeBy: none\n\t\tsourceColumn: Year\n\n"
+            "\tpartition WEO_Data = m\n\t\tmode: import\n\t\tsource = let x = 1 in x\n"
+        )
+        write_semantic_model(sm, tmdl)
+
+        updated = json.loads((sm / "diagramLayout.json").read_text(encoding="utf-8"))
+        node_indices = [n["nodeIndex"] for n in updated["diagrams"][0]["nodes"]]
+        assert "Countries" not in node_indices
+        assert "WEO_Data" in node_indices
+
+
+class TestAutoHealMeasurePartitions:
+    def test_auto_heals_measure_only_table(self, tmp_path: Path) -> None:
+        sm = _scaffold_semantic_model(tmp_path)
+        tmdl = (
+            "table WEO_Data\n"
+            "\tlineageTag: 44444444-4444-4444-8444-444444444444\n\n"
+            "\tcolumn Year\n\t\tdataType: int64\n"
+            "\t\tlineageTag: 55555555-5555-4555-8555-555555555555\n"
+            "\t\tsummarizeBy: none\n\t\tsourceColumn: Year\n\n"
+            "\tpartition WEO_Data = m\n\t\tmode: import\n\t\tsource = let x = 1 in x\n\n"
+            "table _Measures\n"
+            "\tlineageTag: 66666666-6666-4666-8666-666666666666\n\n"
+            "\tmeasure 'Total Growth' = AVERAGE(WEO_Data[Year])\n"
+            "\t\tformatString: 0.00%\n"
+            "\t\tlineageTag: 77777777-7777-4777-8777-777777777777\n"
+        )
+        write_semantic_model(sm, tmdl)
+
+        measures_tmdl = (sm / "definition" / "tables" / "_Measures.tmdl").read_text(encoding="utf-8")
+        assert "partition _Measures = calculated" in measures_tmdl
+        assert "mode: import" in measures_tmdl
+        assert "source = {BLANK()}" in measures_tmdl
+
+    def test_rejects_column_table_missing_partition(self, tmp_path: Path) -> None:
+        sm = _scaffold_semantic_model(tmp_path)
+        tmdl = (
+            "table RawData\n"
+            "\tlineageTag: 44444444-4444-4444-8444-444444444444\n\n"
+            "\tcolumn Value\n\t\tdataType: double\n"
+            "\t\tlineageTag: 55555555-5555-4555-8555-555555555555\n"
+            "\t\tsummarizeBy: sum\n\t\tsourceColumn: Value\n"
+        )
+        with pytest.raises(ValueError, match="table-missing-partition"):
+            write_semantic_model(sm, tmdl)
+        assert not (sm / "definition" / "tables" / "RawData.tmdl").exists()
+
+    def test_unit_auto_heal_preserves_existing_partition(self) -> None:
+        raw = (
+            "table MyCalc\n"
+            "\tcolumn Val\n\t\tdataType: int64\n"
+            "\tpartition MyCalc = calculated\n\t\tmode: import\n\t\tsource = {1}\n"
+        )
+        assert _auto_heal_measure_partitions(raw, "MyCalc") == raw
+
+
+class TestSyncPbiQueryOrder:
+    def test_prunes_stale_queries_and_adds_new_m_queries(self, tmp_path: Path) -> None:
+        sm = _scaffold_semantic_model(tmp_path)
+        tables_dir = sm / "definition" / "tables"
+        (tables_dir / "MacroData.tmdl").write_text(
+            "table MacroData\n\tpartition MacroData = m\n\t\tmode: import\n", encoding="utf-8"
+        )
+        (tables_dir / "_Measures.tmdl").write_text(
+            "table _Measures\n\tpartition _Measures = calculated\n\t\tmode: import\n", encoding="utf-8"
+        )
+
+        model_tmdl = sm / "definition" / "model.tmdl"
+        model_tmdl.write_text(
+            'model Model\n\tculture: en-US\n\nannotation PBI_QueryOrder = ["DeletedQuery", "StaleTable"]\n\nref table MacroData\n',
+            encoding="utf-8",
+        )
+
+        _sync_pbi_query_order(sm)
+
+        content = model_tmdl.read_text(encoding="utf-8")
+        assert 'annotation PBI_QueryOrder = ["MacroData"]' in content
+        assert "DeletedQuery" not in content
+        assert "_Measures" not in content
+
+    def test_preserves_order_of_surviving_m_queries(self, tmp_path: Path) -> None:
+        sm = _scaffold_semantic_model(tmp_path)
+        tables_dir = sm / "definition" / "tables"
+        (tables_dir / "TableB.tmdl").write_text(
+            "table TableB\n\tpartition TableB = m\n\t\tmode: import\n", encoding="utf-8"
+        )
+        (tables_dir / "TableA.tmdl").write_text(
+            "table TableA\n\tpartition TableA = m\n\t\tmode: import\n", encoding="utf-8"
+        )
+        (tables_dir / "TableC.tmdl").write_text(
+            "table TableC\n\tpartition TableC = m\n\t\tmode: import\n", encoding="utf-8"
+        )
+
+        model_tmdl = sm / "definition" / "model.tmdl"
+        model_tmdl.write_text(
+            'model Model\n\tculture: en-US\n\nannotation PBI_QueryOrder = ["TableB", "OldDeleted", "TableA"]\n\nref table TableB\n',
+            encoding="utf-8",
+        )
+
+        _sync_pbi_query_order(sm)
+
+        content = model_tmdl.read_text(encoding="utf-8")
+        assert 'annotation PBI_QueryOrder = ["TableB", "TableA", "TableC"]' in content
+
+    def test_inserts_query_order_when_missing_and_m_tables_exist(self, tmp_path: Path) -> None:
+        sm = _scaffold_semantic_model(tmp_path)
+        tables_dir = sm / "definition" / "tables"
+        (tables_dir / "Sales.tmdl").write_text(
+            "table Sales\n\tpartition Sales = m\n\t\tmode: import\n", encoding="utf-8"
+        )
+
+        model_tmdl = sm / "definition" / "model.tmdl"
+        model_tmdl.write_text(
+            "model Model\n\tculture: en-US\n\nref table Sales\n\nref cultureInfo en-US\n",
+            encoding="utf-8",
+        )
+
+        _sync_pbi_query_order(sm)
+
+        content = model_tmdl.read_text(encoding="utf-8")
+        assert 'annotation PBI_QueryOrder = ["Sales"]' in content
+

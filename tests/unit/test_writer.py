@@ -140,11 +140,12 @@ def test_theme_json_present_and_non_empty(
         / "StaticResources"
         / "SharedResources"
         / "BaseThemes"
-        / "SimBIDefault.json"
+        / "CY25SU10.json"
     )
     assert theme_path.exists()
     assert theme_path.stat().st_size > 1000
     theme_content = json.loads(theme_path.read_text())
+    assert theme_content["name"] == "CY25SU10"
     assert theme_content["dataColors"][0].upper() == "#118DFF"
     assert theme_content["visualStyles"]
 
@@ -156,8 +157,9 @@ def test_report_json_has_theme_collection(
     content = json.loads(
         (tmp_path / "TestReport.Report" / "definition" / "report.json").read_text()
     )
-    assert content["themeCollection"]["baseTheme"]["name"] == "SimBIDefault"
+    assert content["themeCollection"]["baseTheme"]["name"] == "CY25SU10"
     assert "settings" in content
+    assert "objects" not in content
 
 
 def test_write_report_with_user_theme_override(
@@ -180,21 +182,41 @@ def test_write_report_with_user_theme_override(
     emitted = json.loads(
         (
             tmp_path / "TestReport.Report" / "StaticResources" / "SharedResources"
-            / "BaseThemes" / "AcmeBrand.json"
+            / "BaseThemes" / "CY25SU10.json"
         ).read_text()
     )
+    assert emitted["name"] == "CY25SU10"
     assert emitted["dataColors"] == ["#FF0000", "#00FF00", "#0000FF"]
     assert emitted["visualStyles"]
     report_json = json.loads(
         (tmp_path / "TestReport.Report" / "definition" / "report.json").read_text()
     )
-    assert report_json["themeCollection"]["baseTheme"]["name"] == "AcmeBrand"
+    assert report_json["themeCollection"]["baseTheme"]["name"] == "CY25SU10"
+
+
+def test_visual_position_coordinates_sanitized_to_integers(
+    tmp_path: Path, sample_visuals: list[dict[str, Any]]
+) -> None:
+    """Float position coordinates are sanitized to clean integers."""
+    report_dir = write_report(
+        pages=[PageSpec(visuals=sample_visuals)], report_name="TestReport", output_dir=tmp_path
+    )
+    pages_dir = report_dir / "definition" / "pages"
+    page_guid = json.loads((pages_dir / "pages.json").read_text())["pageOrder"][0]
+    visual_json = json.loads(
+        (pages_dir / page_guid / "visuals" / "abcd1234ef5678901234" / "visual.json").read_text()
+    )
+    pos = visual_json["position"]
+    for k in ("x", "y", "width", "height", "z", "tabOrder"):
+        assert isinstance(pos[k], int) and not isinstance(pos[k], bool)
+    assert pos["x"] == 24
+    assert pos["width"] == 400
 
 
 def test_write_report_does_not_create_pbip(
     tmp_path: Path, sample_visuals: list[dict[str, Any]]
 ) -> None:
-    """SimBI never creates the .pbip — that's PBI Desktop / Power BI MCP's job."""
+    """SimBI never creates the .pbip: that's PBI Desktop / Power BI MCP's job."""
     write_report(pages=[PageSpec(visuals=sample_visuals)], report_name="TestReport", output_dir=tmp_path)
     assert not (tmp_path / "TestReport.pbip").exists()
 
@@ -202,7 +224,7 @@ def test_write_report_does_not_create_pbip(
 def test_write_report_does_not_create_semantic_model(
     tmp_path: Path, sample_visuals: list[dict[str, Any]]
 ) -> None:
-    """SimBI never creates the .SemanticModel — that's PBI Desktop / PBI MCP's job."""
+    """SimBI never creates the .SemanticModel: that's PBI Desktop / PBI MCP's job."""
     write_report(pages=[PageSpec(visuals=sample_visuals)], report_name="TestReport", output_dir=tmp_path)
     assert not (tmp_path / "TestReport.SemanticModel").exists()
 
@@ -210,7 +232,7 @@ def test_write_report_does_not_create_semantic_model(
 def test_repeat_write_clears_orphan_page_folders(
     tmp_path: Path, sample_visuals: list[dict[str, Any]]
 ) -> None:
-    """Each emit_report uses a fresh page GUID — old page folders must be wiped."""
+    """Each emit_report uses a fresh page GUID: old page folders must be wiped."""
     write_report(pages=[PageSpec(visuals=sample_visuals)], report_name="TestReport", output_dir=tmp_path)
     pages_dir = tmp_path / "TestReport.Report" / "definition" / "pages"
     first_guid = json.loads((pages_dir / "pages.json").read_text())["pageOrder"][0]
@@ -228,6 +250,7 @@ def test_visual_internal_keys_stripped(tmp_path: Path) -> None:
     visual = {
         "$schema": _VISUAL_SCHEMA,
         "name": "abcd1234ef5678901234",
+        "position": {"x": 0, "y": 0, "z": 0, "width": 100, "height": 100, "tabOrder": 0},
         "simbiId": "chartBar",
         "simbiButtonAction": {"kind": "bookmark"},
         "visual": {"visualType": "card"},

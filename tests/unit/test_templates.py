@@ -35,12 +35,18 @@ def test_card_has_measure_projection(schema: ModelSchema) -> None:
 def test_card_position(schema: ModelSchema) -> None:
     result = build_visual_json(_card_node(), z_order=1000, schema=schema)
     pos = result["position"]
-    assert pos["x"] == 24.0
-    assert pos["y"] == 24.0
+    assert isinstance(pos["x"], int) and not isinstance(pos["x"], bool)
+    assert pos["x"] == 24
+    assert isinstance(pos["y"], int) and not isinstance(pos["y"], bool)
+    assert pos["y"] == 24
+    assert isinstance(pos["z"], int) and not isinstance(pos["z"], bool)
     assert pos["z"] == 1000
+    assert isinstance(pos["tabOrder"], int) and not isinstance(pos["tabOrder"], bool)
     assert pos["tabOrder"] == 1000
-    assert pos["width"] == 400.0
-    assert pos["height"] == 104.0
+    assert isinstance(pos["width"], int) and not isinstance(pos["width"], bool)
+    assert pos["width"] == 400
+    assert isinstance(pos["height"], int) and not isinstance(pos["height"], bool)
+    assert pos["height"] == 104
 
 
 def test_card_schema_url(schema: ModelSchema) -> None:
@@ -937,7 +943,7 @@ def test_shape_gets_geometry_styling_not_container(schema) -> None:
     objs = container["visual"]["objects"]
     assert objs["fill"][0]["properties"]["fillColor"] == solid("#1E3A8A")
     assert objs["shape"][0]["properties"]["tileShape"] == literal("'rectangle'")
-    assert objs["shape"][0]["properties"]["roundEdge"] == literal("8L")
+    assert "roundEdge" not in objs["shape"][0]["properties"]
     assert "visualContainerObjects" not in container["visual"]
 
 

@@ -1,4 +1,4 @@
-"""PBIR Report folder writer — generates only the .Report half of a .pbip project.
+"""PBIR Report folder writer: generates only the .Report half of a .pbip project.
 
 The .pbip and .SemanticModel are produced by Power BI Desktop / Power BI MCP;
 SimBI never creates or touches them. This writer outputs only:
@@ -8,7 +8,7 @@ SimBI never creates or touches them. This writer outputs only:
   - <name>.Report/definition/pages/pages.json
   - <name>.Report/definition/pages/<page-guid>/page.json
   - <name>.Report/definition/pages/<page-guid>/visuals/<visual-guid>/visual.json
-  - <name>.Report/StaticResources/SharedResources/BaseThemes/<theme-name>.json
+  - <name>.Report/StaticResources/SharedResources/BaseThemes/CY25SU10.json
 """
 from __future__ import annotations
 
@@ -18,6 +18,10 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from simbi_mcp.pbir.pbir_validator import validate_pbir_report
+
+BASE_THEME_NAME = "CY25SU10"
 
 
 @dataclass
@@ -35,31 +39,26 @@ _VERSION_SCHEMA = "https://developer.microsoft.com/json-schemas/fabric/item/repo
 _REPORT_SCHEMA = "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/report/3.0.0/schema.json"
 
 
-def _report_json(theme_name: str) -> dict[str, Any]:
+def _report_json() -> dict[str, Any]:
     return {
         "$schema": _REPORT_SCHEMA,
         "themeCollection": {
             "baseTheme": {
-                "name": theme_name,
+                "name": BASE_THEME_NAME,
                 "reportVersionAtImport": {"visual": "2.1.0", "report": "3.0.0", "page": "2.3.0"},
                 "type": "SharedResources",
             }
-        },
-        "objects": {
-            "section": [
-                {
-                    "properties": {
-                        "verticalAlignment": {"expr": {"Literal": {"Value": "'Top'"}}}
-                    }
-                }
-            ]
         },
         "resourcePackages": [
             {
                 "name": "SharedResources",
                 "type": "SharedResources",
                 "items": [
-                    {"name": theme_name, "path": f"BaseThemes/{theme_name}.json", "type": "BaseTheme"}
+                    {
+                        "name": BASE_THEME_NAME,
+                        "path": f"BaseThemes/{BASE_THEME_NAME}.json",
+                        "type": "BaseTheme",
+                    }
                 ],
             }
         ],
@@ -87,11 +86,11 @@ def write_report(
 
     The folder is named <report_name>.Report and created inside output_dir.
     semantic_model_rel_path defaults to ../<report_name>.SemanticModel, which
-    places it as a sibling of the Report folder — the standard Power BI layout.
+    places it as a sibling of the Report folder: the standard Power BI layout.
 
     `theme` is a fully-resolved PBIR theme dict (typically from
-    simbi_mcp.pbir.theme.resolve_theme). When None, the static SimBIDefault
-    theme is loaded from disk — preserving backward compatibility for callers
+    simbi_mcp.pbir.theme.resolve_theme). When None, the static CY25SU10/SimBI
+    theme is loaded from disk: preserving backward compatibility for callers
     that haven't been updated.
     """
     if semantic_model_rel_path is None:
@@ -100,8 +99,6 @@ def write_report(
     if theme is None:
         from simbi_mcp.pbir.theme import resolve_theme
         theme = resolve_theme(user_theme_path=None)
-
-    theme_name = theme.get("name") or "SimBIDefault"
 
     report_dir = output_dir / f"{report_name}.Report"
 
@@ -138,7 +135,7 @@ def write_report(
         report_dir / "definition" / "version.json",
         {"$schema": _VERSION_SCHEMA, "version": "2.0.0"},
     )
-    _write_json(report_dir / "definition" / "report.json", _report_json(theme_name))
+    _write_json(report_dir / "definition" / "report.json", _report_json())
     _write_json(
         report_dir / "definition" / "pages" / "pages.json",
         {"$schema": _PAGES_SCHEMA, "pageOrder": page_guids, "activePageName": page_guids[0]},
@@ -166,7 +163,17 @@ def write_report(
                 raise ValueError(
                     f"visual dict at index {i} is missing required key 'name'"
                 ) from exc
-            clean = {k: v for k, v in visual.items() if k not in ("simbiId", "simbiButtonAction", "simbiStyling")}
+            clean = {
+                k: v for k, v in visual.items()
+                if k not in ("simbiId", "simbiButtonAction", "simbiStyling")
+            }
+            pos = clean.get("position")
+            if isinstance(pos, dict):
+                coords = ("x", "y", "width", "height", "z", "tabOrder")
+                clean["position"] = {
+                    k: round(float(v)) if k in coords and v is not None else v
+                    for k, v in pos.items()
+                }
             _write_json(
                 report_dir
                 / "definition"
@@ -188,9 +195,14 @@ def write_report(
         for b in bookmarks:
             _write_json(bdir / f"{b['name']}.bookmark.json", b)
 
-    theme_dest = base_themes_dir / f"{theme_name}.json"
+    theme_dest = base_themes_dir / f"{BASE_THEME_NAME}.json"
     theme_dest.parent.mkdir(parents=True, exist_ok=True)
-    theme_dest.write_text(json.dumps(theme, indent=2), encoding="utf-8")
+    resolved_theme = dict(theme)
+    resolved_theme["name"] = BASE_THEME_NAME
+    theme_dest.write_text(json.dumps(resolved_theme, indent=2), encoding="utf-8")
+
+    # Strict Power BI Desktop PBIR validation
+    validate_pbir_report(report_dir, raise_on_error=True)
 
     return report_dir
 

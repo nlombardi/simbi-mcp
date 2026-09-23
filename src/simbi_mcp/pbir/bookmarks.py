@@ -53,10 +53,17 @@ def build_bookmark_json(
         sv = {"visualType": visual_types.get(guid, ""), "objects": {}}
         containers[guid] = {"singleVisual": sv}
 
+    target_guids: list[str] = []
+    seen: set[str] = set()
+    for g in list(bookmark.target) + list(bookmark.visible) + list(bookmark.hidden):
+        if g not in seen:
+            seen.add(g)
+            target_guids.append(g)
+
     options: dict[str, Any] = {}
-    if bookmark.target:
+    if target_guids:
         options["applyOnlyToTargetVisuals"] = True
-        options["targetVisualNames"] = list(bookmark.target)
+        options["targetVisualNames"] = target_guids
     if "currentPage" not in bookmark.captures:
         options["suppressActiveSection"] = True
     if "data" not in bookmark.captures:
