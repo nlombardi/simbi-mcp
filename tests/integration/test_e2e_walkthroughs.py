@@ -29,6 +29,11 @@ _HTML = (_FIXTURES / "html" / "sales_walkthrough.html").read_text(encoding="utf-
 _EXPECTED_VISUAL_COUNT = 6
 
 
+def _report_dir_from_result(text: str) -> Path:
+    """emit_report now returns a multi-line report; the .Report path is the first line."""
+    return Path(text.splitlines()[0].removeprefix(".Report written: "))
+
+
 def _visual_files(report_dir: Path) -> list[Path]:
     pages_dir = report_dir / "definition" / "pages"
     pages = json.loads((pages_dir / "pages.json").read_text())
@@ -71,7 +76,7 @@ async def test_walkthrough_returns_report_dir(tmp_path: Path) -> None:
         {"html": _HTML, "schema_json": schema_json, "pbip_path": str(pbip)},
     )
 
-    report_dir = Path(emit_result["result"])
+    report_dir = _report_dir_from_result(emit_result["result"])
     assert report_dir == tmp_path / "SalesDashboard.Report"
     assert report_dir.is_dir()
 

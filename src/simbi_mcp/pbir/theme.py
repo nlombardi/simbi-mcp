@@ -88,3 +88,60 @@ def _load_user_theme(path: Path) -> dict[str, Any]:
             f"'dataColors', 'textClasses', 'visualStyles'."
         )
     return data
+
+
+def build_theme_schema_text() -> str:
+    """Render the theme JSON schema from SimBI's actual resolved default.
+
+    Generated from the real CY25SU10.json/SimBIDefault.json files (via
+    resolve_theme) rather than hand-written, so the palette, textClasses, and
+    the list of visual types SimBI already opinionates on can never drift from
+    what emit_report actually applies.
+    """
+    theme = resolve_theme(user_theme_path=None)
+    lines: list[str] = [
+        "THEME SCHEMA",
+        "============",
+        "emit_report's optional theme_path is a partial PBIR theme JSON file.",
+        "Resolution order (each tier deep-merges ONTO the previous one):",
+        "  1. Microsoft CY25SU10 — colour science, semantic palette, text classes",
+        "  2. SimBI opinionated defaults — visualStyles enforcing the dashboard",
+        "     design playbook (hidden gridlines, lean cards, no visual borders,",
+        "     consistent typography)",
+        "  3. Your theme_path file (optional) — deep-merged on top; you only",
+        "     need to override what you care about (typically just dataColors)",
+        "     without erasing SimBI's visualStyles opinions.",
+        "",
+        "TOP-LEVEL KEYS",
+        "==============",
+        f'  dataColors      ordered hex list, categorical series colours. Current default '
+        f"starts {theme['dataColors'][0]!r}, {len(theme['dataColors'])} colours total. "
+        "First entries are also referenced by shape fill (ThemeDataColor ColorId 0).",
+        f"  good / neutral / bad   semantic single colours ({theme['good']!r} / "
+        f"{theme['neutral']!r} / {theme['bad']!r}). RESERVED — never reassign these to "
+        "categorical data (see DESIGN PRINCIPLES > COLOUR).",
+        f"  textClasses     typography per role: {', '.join(sorted(theme['textClasses']))}.",
+        "  visualStyles    per-visualType nested property objects — the biggest lever.",
+        "",
+        "VISUAL TYPES SIMBI ALREADY STYLES",
+        "==================================",
+        "SimBI's own default already sets visualStyles for these PBIR visual types",
+        "(overriding one deep-merges onto SimBI's existing object for that type —",
+        "it does not replace it):",
+    ]
+    for vtype in theme["visualStyles"]:
+        if vtype == "*":
+            continue
+        lines.append(f"  {vtype}")
+    lines += [
+        "",
+        "PER-VISUAL OVERRIDE BOUNDARY",
+        "=============================",
+        "This theme sets the REPORT-WIDE baseline. A single visual's explicit",
+        "data-pbi-fill / data-pbi-stroke attributes, or its element's own computed",
+        "CSS (background-color, border, border-radius, box-shadow — see",
+        "get_vocabulary's STYLING CONTRACT section), override the theme for THAT",
+        "one visual only. Use the theme for report-wide branding; use per-element",
+        "styling in the mockup HTML for one-off exceptions.",
+    ]
+    return "\n".join(lines)

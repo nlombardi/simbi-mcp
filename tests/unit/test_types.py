@@ -1,66 +1,20 @@
-"""Smoke tests for shared Pydantic types."""
+"""Tests for shared Pydantic types, including data-profile models."""
+from __future__ import annotations
+
+import json
+
 import pytest
 from pydantic import ValidationError
 
 from simbi_mcp.types import (
     ColumnProfile,
-    ColumnRole,
-    DatasetProfile,
-    MeasurePlan,
+    DataSourceProfile,
     ModelColumn,
     ModelMeasure,
     ModelSchema,
     ModelTable,
+    TableProfile,
 )
-
-
-class TestColumnProfile:
-    def test_minimal_valid(self) -> None:
-        cp = ColumnProfile(
-            name="Revenue",
-            dtype="float64",
-            role=ColumnRole.MEASURE,
-            null_count=0,
-            distinct_count=42,
-            sample_values=[1.0, 2.5, 3.14],
-        )
-        assert cp.name == "Revenue"
-        assert cp.role is ColumnRole.MEASURE
-
-    def test_rejects_unknown_role(self) -> None:
-        with pytest.raises(ValidationError):
-            ColumnProfile(
-                name="X", dtype="int64", role="bogus",  # type: ignore[arg-type]
-                null_count=0, distinct_count=1, sample_values=[],
-            )
-
-
-class TestDatasetProfile:
-    def test_round_trip(self) -> None:
-        dp = DatasetProfile(
-            source_path="/tmp/x.csv",
-            table_name="sales",
-            row_count=50,
-            columns=[
-                ColumnProfile(
-                    name="Revenue", dtype="float64", role=ColumnRole.MEASURE,
-                    null_count=0, distinct_count=50, sample_values=[1.0],
-                ),
-            ],
-        )
-        roundtrip = DatasetProfile.model_validate_json(dp.model_dump_json())
-        assert roundtrip == dp
-
-
-class TestMeasurePlan:
-    def test_minimal_valid(self) -> None:
-        mp = MeasurePlan(
-            name="Total Revenue",
-            expression="SUM('sales'[Revenue])",
-            return_type="currency",
-            rationale="User asked for revenue totals",
-        )
-        assert mp.name == "Total Revenue"
 
 
 class TestModelSchema:
@@ -85,3 +39,58 @@ class TestModelSchema:
         assert schema.has_measure("Total Revenue")
         assert not schema.has_measure("Nonexistent")
         assert schema.find_measure("Total Revenue").table == "sales"
+
+
+def test_column_profile_defaults() -> None:
+    col = ColumnProfile(
+        name="Region",
+        polars_dtype="String",
+        tmdl_type="string",
+        null_count=0,
+        null_pct=0.0,
+        distinct_count=4,
+        sample_values=["North", "South"],
+    )
+    assert col.min is None
+    assert col.max is None
+    assert col.hints == []
+
+
+def test_data_source_profile_round_trips_through_json() -> None:
+    profile = DataSourceProfile(
+        source_path="Sales.csv",
+        tables=[
+            TableProfile(
+                table_name="Sales",
+                row_count=50,
+                columns=[
+                    ColumnProfile(
+                        name="OrderID",
+                        polars_dtype="Int64",
+                        tmdl_type="int64",
+                        null_count=0,
+                        null_pct=0.0,
+                        distinct_count=50,
+                        sample_values=["1001", "1002"],
+                        min="1001",
+                        max="1050",
+                        hints=["likely primary key"],
+                    ),
+                ],
+                hints=[],
+            ),
+        ],
+    )
+    payload = json.loads(profile.model_dump_json())
+    assert payload["source_path"] == "Sales.csv"
+    assert payload["tables"][0]["table_name"] == "Sales"
+    assert payload["tables"][0]["columns"][0]["hints"] == ["likely primary key"]
+
+
+def test_models_are_frozen() -> None:
+    col = ColumnProfile(
+        name="Region", polars_dtype="String", tmdl_type="string",
+        null_count=0, null_pct=0.0, distinct_count=4, sample_values=[],
+    )
+    with pytest.raises(ValidationError):
+        col.name = "Other"  # type: ignore[misc]

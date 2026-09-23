@@ -7,6 +7,7 @@ from simbi_mcp.mockup.validator import ValidationError, validate_mockup
 from simbi_mcp.types import (
     ModelColumn,
     ModelMeasure,
+    ModelRelationship,
     ModelSchema,
     ModelTable,
 )
@@ -265,3 +266,241 @@ def test_filled_map_validates_color_saturation_measure(schema: ModelSchema) -> N
     )
     with pytest.raises(ValidationError, match="GhostMeasure"):
         validate_mockup(html, schema)
+
+
+# ---------- Cross-table axis/series relationship guardrail ----------
+
+
+def _xtable_schema(relationships: list[ModelRelationship]) -> ModelSchema:
+    return ModelSchema(
+        tables=[
+            ModelTable(name="Fact", columns=[ModelColumn(name="Year"), ModelColumn(name="Country")]),
+            ModelTable(name="DimYear", columns=[ModelColumn(name="Year")]),
+        ],
+        measures=[ModelMeasure(name="Rev", table="Fact", expression="SUM(Fact[V])", return_type="number")],
+        relationships=relationships,
+    )
+
+
+def test_cross_table_axis_series_no_relationship_is_fatal() -> None:
+    schema = _xtable_schema([])  # no relationships
+    html = ('<div data-pbi="clusteredColumnChart" data-pbi-axis="DimYear[Year]" '
+            'data-pbi-values="Rev" data-pbi-series="Fact[Country]"></div>')
+    with pytest.raises(ValidationError, match="no.*relationship|relationship connects"):
+        validate_mockup(html, schema)
+
+
+def test_cross_table_axis_series_with_relationship_warns() -> None:
+    schema = _xtable_schema([ModelRelationship(from_table="Fact", from_column="Year", to_table="DimYear", to_column="Year")])
+    html = ('<div data-pbi="clusteredColumnChart" data-pbi-axis="DimYear[Year]" '
+            'data-pbi-values="Rev" data-pbi-series="Fact[Country]"></div>')
+    warnings = validate_mockup(html, schema)
+    assert any("different tables" in w for w in warnings)
+
+
+def test_same_table_axis_series_no_warning() -> None:
+    schema = _xtable_schema([])
+    html = ('<div data-pbi="clusteredColumnChart" data-pbi-axis="Fact[Year]" '
+            'data-pbi-values="Rev" data-pbi-series="Fact[Country]"></div>')
+    warnings = validate_mockup(html, schema)
+    assert warnings == []
+
+
+def test_clean_mockup_returns_empty_warnings() -> None:
+    schema = _xtable_schema([])
+    html = '<div data-pbi="card" data-pbi-measure="Rev"></div>'
+    assert validate_mockup(html, schema) == []
+
+
+def test_unknown_attr_is_hard_error_with_suggestion(schema) -> None:
+    html = '<div data-pbi="shape" data-pbi-fil="#ff0000" style="width:10px;height:10px"></div>'
+    with pytest.raises(ValidationError, match="data-pbi-fill"):
+        validate_mockup(html, schema)
+
+
+def test_unknown_attr_error_lists_valid_attrs(schema) -> None:
+    html = '<div data-pbi="card" data-pbi-measure="Total Revenue" data-pbi-nonsense="x"></div>'
+    with pytest.raises(ValidationError, match="data-pbi-measure"):
+        validate_mockup(html, schema)
+
+
+def test_universal_attrs_accepted_on_every_type(schema) -> None:
+    html = (
+        '<div data-pbi="card" data-pbi-measure="Total Revenue" '
+        'data-pbi-id="kpi1" data-pbi-hidden="true"></div>'
+    )
+    assert validate_mockup(html, schema) == []
+
+
+def test_non_data_pbi_attrs_ignored(schema) -> None:
+    html = (
+        '<div class="db-card" id="x" style="color:red" '
+        'data-pbi="card" data-pbi-measure="Total Revenue"></div>'
+    )
+    validate_mockup(html, schema)  # must not raise
+
+
+# ---------- Cross-reference checks (bookmarks and buttons) ----------
+
+
+def test_bookmark_unknown_visual_id_is_error(schema) -> None:
+    html = (
+        '<div data-pbi="lineChart" data-pbi-id="chartLine" '
+        'data-pbi-axis="sales[OrderDate]" data-pbi-values="Total Revenue"></div>'
+        '<div data-pbi="bookmark" data-pbi-name="View: Bar" '
+        'data-pbi-visible="chartBar" data-pbi-hidden="chartLine"></div>'
+    )
+    with pytest.raises(ValidationError, match="chartBar"):
+        validate_mockup(html, schema)
+
+
+def test_bookmark_known_ids_pass(schema) -> None:
+    html = (
+        '<div data-pbi="lineChart" data-pbi-id="chartLine" '
+        'data-pbi-axis="sales[OrderDate]" data-pbi-values="Total Revenue"></div>'
+        '<div data-pbi="barChart" data-pbi-id="chartBar" data-pbi-hidden="true" '
+        'data-pbi-axis="sales[Region]" data-pbi-values="Total Revenue"></div>'
+        '<div data-pbi="bookmark" data-pbi-name="View: Bar" data-pbi-captures="visibility" '
+        'data-pbi-visible="chartBar" data-pbi-hidden="chartLine"></div>'
+    )
+    validate_mockup(html, schema)  # must not raise
+
+
+def test_bookmark_target_all_is_skipped(schema) -> None:
+    html = (
+        '<div data-pbi="card" data-pbi-measure="Total Revenue"></div>'
+        '<div data-pbi="bookmark" data-pbi-name="B" data-pbi-target="all"></div>'
+    )
+    validate_mockup(html, schema)  # must not raise
+
+
+def test_duplicate_visual_id_is_error(schema) -> None:
+    html = (
+        '<div data-pbi="card" data-pbi-id="dup" data-pbi-measure="Total Revenue"></div>'
+        '<div data-pbi="card" data-pbi-id="dup" data-pbi-measure="Order Count"></div>'
+    )
+    with pytest.raises(ValidationError, match="dup"):
+        validate_mockup(html, schema)
+
+
+def test_button_unknown_bookmark_is_error(schema) -> None:
+    html = (
+        '<div data-pbi="bookmark" data-pbi-name="View: Bar"></div>'
+        '<div data-pbi="button" data-pbi-action="bookmark" data-pbi-bookmark="View: Line"></div>'
+    )
+    with pytest.raises(ValidationError, match="View: Bar"):
+        validate_mockup(html, schema)
+
+
+def test_button_bookmark_action_requires_bookmark_attr(schema) -> None:
+    html = '<div data-pbi="button" data-pbi-action="bookmark"></div>'
+    with pytest.raises(ValidationError, match="data-pbi-bookmark"):
+        validate_mockup(html, schema)
+
+
+def test_button_navigate_action_requires_page_attr(schema) -> None:
+    html = '<div data-pbi="button" data-pbi-action="navigate"></div>'
+    with pytest.raises(ValidationError, match="data-pbi-page"):
+        validate_mockup(html, schema)
+
+
+def test_button_navigate_unknown_page_is_error(schema) -> None:
+    html = (
+        '<div data-pbi-page="Page 1">'
+        '  <div data-pbi="card" data-pbi-measure="Total Revenue"></div>'
+        '  <div data-pbi="button" data-pbi-action="navigate" data-pbi-page="Page 3"></div>'
+        '</div>'
+    )
+    with pytest.raises(ValidationError, match="unknown page 'Page 3'"):
+        validate_mockup(html, schema)
+
+
+def test_button_navigate_known_page_passes(schema) -> None:
+    html = (
+        '<div data-pbi-page="Page 1">'
+        '  <div data-pbi="card" data-pbi-measure="Total Revenue"></div>'
+        '  <div data-pbi="button" data-pbi-action="navigate" data-pbi-page="Page 2"></div>'
+        '</div>'
+        '<div data-pbi-page="Page 2">'
+        '  <div data-pbi="card" data-pbi-measure="Order Count"></div>'
+        '</div>'
+    )
+    validate_mockup(html, schema)  # must not raise
+
+
+def test_button_invalid_action_is_error(schema) -> None:
+    html = '<div data-pbi="button" data-pbi-action="invalidAction"></div>'
+    with pytest.raises(ValidationError, match="data-pbi-action='invalidAction' is invalid"):
+        validate_mockup(html, schema)
+
+
+def test_button_reset_action_passes(schema) -> None:
+    html = '<div data-pbi="button" data-pbi-action="reset" data-pbi-text="Reset All"></div>'
+    validate_mockup(html, schema)  # must not raise
+
+
+# ---------- Bar chart time-axis heuristic warning ----------
+
+
+def _schema_with_year() -> ModelSchema:
+    return ModelSchema(
+        tables=[ModelTable(name="gdp", columns=[
+            ModelColumn(name="Year", data_type="int64"),
+            ModelColumn(name="Country"),
+            ModelColumn(name="AsOf", data_type="dateTime"),
+        ])],
+        measures=[ModelMeasure(name="GDP", table="gdp", expression="SUM(gdp[Value])", return_type="number")],
+        relationships=[],
+    )
+
+
+def test_barchart_year_axis_warns() -> None:
+    html = '<div data-pbi="barChart" data-pbi-axis="gdp[Year]" data-pbi-values="GDP"></div>'
+    warnings = validate_mockup(html, _schema_with_year())
+    assert any("HORIZONTAL" in w and "columnChart" in w for w in warnings)
+
+
+def test_barchart_datetime_axis_warns() -> None:
+    html = '<div data-pbi="barChart" data-pbi-axis="gdp[AsOf]" data-pbi-values="GDP"></div>'
+    warnings = validate_mockup(html, _schema_with_year())
+    assert any("columnChart" in w for w in warnings)
+
+
+def test_barchart_category_axis_does_not_warn() -> None:
+    html = '<div data-pbi="barChart" data-pbi-axis="gdp[Country]" data-pbi-values="GDP"></div>'
+    assert validate_mockup(html, _schema_with_year()) == []
+
+
+def test_columnchart_year_axis_does_not_warn() -> None:
+    html = '<div data-pbi="columnChart" data-pbi-axis="gdp[Year]" data-pbi-values="GDP"></div>'
+    assert validate_mockup(html, _schema_with_year()) == []
+
+
+# ---------- Inline style warnings ----------
+
+
+def test_inline_color_warns(schema) -> None:
+    html = (
+        '<div data-pbi="card" data-pbi-measure="Total Revenue" '
+        'style="color: red; background-color: #fff"></div>'
+    )
+    warnings = validate_mockup(html, schema)
+    assert any("'color'" in w and "does not transfer" in w for w in warnings)
+    assert not any("background-color" in w for w in warnings)  # honored, no warning
+
+
+def test_inline_gradient_warns(schema) -> None:
+    html = (
+        '<div data-pbi="card" data-pbi-measure="Total Revenue" '
+        'style="background: linear-gradient(#fff, #000)"></div>'
+    )
+    warnings = validate_mockup(html, schema)
+    assert any("gradient" in w for w in warnings)
+
+
+def test_inline_layout_props_do_not_warn(schema) -> None:
+    html = (
+        '<div data-pbi="card" data-pbi-measure="Total Revenue" '
+        'style="position:absolute; left:10px; top:10px; width:200px; height:100px"></div>'
+    )
+    assert validate_mockup(html, schema) == []

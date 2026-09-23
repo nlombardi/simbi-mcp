@@ -12,13 +12,22 @@ because those measures will already be in the file and are skipped.
 """
 from __future__ import annotations
 
+import json
+import re
 import uuid
 from pathlib import Path
 
-from simbi_mcp.types import ModelColumn, ModelMeasure, ModelSchema, ModelTable
+from simbi_mcp.pbir.field_param import build_field_param_tmdl
+from simbi_mcp.types import (
+    FieldParameter,
+    ModelColumn,
+    ModelMeasure,
+    ModelSchema,
+    ModelTable,
+)
 
 
-def patch_semantic_model_measures(schema: ModelSchema, semantic_model_dir: Path) -> None:
+def patch_semantic_model_measures(schema: ModelSchema, semantic_model_dir: Path) -> list[str]:
     """Write missing measures into SemanticModel TMDL files.
 
     For each table in `schema` that has measures:
@@ -35,6 +44,12 @@ def patch_semantic_model_measures(schema: ModelSchema, semantic_model_dir: Path)
     duplicate-definition error (TmdlObject.AddContentOf).
 
     Safe to call repeatedly — idempotent per measure name.
+
+    Returns a warning per NEWLY CREATED table — this fallback path is silent
+    and easy to miss (the report opens fine; the visuals just show no data).
+    A caller that intended a real data connection should have called
+    write_semantic_model with a full TMDL (table + partition) instead of
+    letting this create a bare columns/measures-only table.
     """
     tables_dir = semantic_model_dir / "definition" / "tables"
 
@@ -44,7 +59,7 @@ def patch_semantic_model_measures(schema: ModelSchema, semantic_model_dir: Path)
         measures_by_table.setdefault(measure.table, []).append(measure)
 
     if not measures_by_table:
-        return  # no measures to write
+        return []  # no measures to write
 
     # Build a lookup: table name → ModelTable (for column definitions)
     table_by_name: dict[str, ModelTable] = {t.name: t for t in schema.tables}
@@ -55,16 +70,20 @@ def patch_semantic_model_measures(schema: ModelSchema, semantic_model_dir: Path)
         tmdl_path = tables_dir / f"{table_name}.tmdl"
 
         if tmdl_path.exists():
-            existing = tmdl_path.read_text(encoding="utf-8")
+            original = tmdl_path.read_text(encoding="utf-8")
+            existing = _sanitize_tmdl(original)
             new_measures = [
                 m for m in measures
                 if f"measure '{m.name}'" not in existing
                 and f'measure "{m.name}"' not in existing
             ]
-            if not new_measures:
-                continue  # all measures already present — leave file untouched
-            patched = _insert_measures(existing, new_measures)
-            tmdl_path.write_text(patched, encoding="utf-8")
+            if new_measures:
+                existing = _insert_measures(existing, new_measures)
+            # Write back when measures were inserted OR sanitization repaired the
+            # file. A corrupted partition (e.g. `= dax`) must heal even when all
+            # measures are already present; an already-valid file is left as-is.
+            if existing != original:
+                tmdl_path.write_text(existing, encoding="utf-8")
         else:
             # Create a minimal TMDL — columns + measures, no partition
             tables_dir.mkdir(parents=True, exist_ok=True)
@@ -79,9 +98,96 @@ def patch_semantic_model_measures(schema: ModelSchema, semantic_model_dir: Path)
 
     if newly_created:
         _register_ref_tables(semantic_model_dir, newly_created)
+        _sync_pbi_query_order(semantic_model_dir)
+
+    return [
+        f"Table {name!r} had no existing .tmdl — created it with columns/measures "
+        f"only, no data source connected. Either open Power BI Desktop and use "
+        f"Home > Transform Data to connect it, or call write_semantic_model with "
+        f"a full TMDL (table + partition pointing at your CSV/Excel/data source) "
+        f"before calling emit_report, so the table is connected from the start."
+        for name in newly_created
+    ]
+
+
+def patch_field_parameters(
+    field_params: list[FieldParameter],
+    semantic_model_dir: Path,
+    measure_tables: dict[str, str] | None = None,
+) -> None:
+    """Write each field-parameter calc table to TMDL and ref it in model.tmdl.
+
+    The field-parameter table is SimBI-owned and fully regenerable, so it is
+    OVERWRITTEN on every call — re-emitting must pick up a corrected definition
+    (e.g. table-qualified NAMEOF refs) rather than keep a stale file. The
+    `ref table` line is added idempotently via `_register_ref_tables`.
+    """
+    if not field_params:
+        return
+    tables_dir = semantic_model_dir / "definition" / "tables"
+    tables_dir.mkdir(parents=True, exist_ok=True)
+
+    written: list[str] = []
+    for fp in field_params:
+        tmdl_path = tables_dir / f"{fp.name}.tmdl"
+        tmdl_path.write_text(
+            build_field_param_tmdl(fp, measure_tables), encoding="utf-8"
+        )
+        written.append(fp.name)
+
+    _register_ref_tables(semantic_model_dir, written)
 
 
 # ── TMDL text helpers ──────────────────────────────────────────────────────────
+
+_INVALID_MODE_RE = re.compile(r"^([ \t]+mode:[ \t]+)calculated([ \t]*)$", re.MULTILINE)
+_DAX_PARTITION_SOURCE_RE = re.compile(
+    r"^([ \t]*partition[ \t]+.+?[ \t]*=[ \t]*)dax([ \t]*)$", re.MULTILINE
+)
+_CALC_PARTITION_HEADER_RE = re.compile(
+    r"^(?P<indent>[ \t]*)partition[ \t]+.+?[ \t]*=[ \t]*calculated[ \t]*$"
+)
+_MODE_LINE_RE = re.compile(r"^[ \t]+mode:")
+
+
+def _sanitize_tmdl(tmdl: str) -> str:
+    """Repair partition properties that Power BI Desktop rejects on open.
+
+    Two corruptions, both produced by acting on an earlier (wrong) lint message:
+
+      - `= dax` is a fictional PartitionSourceType. The valid keyword for a
+        DAX/calculated table is `calculated`; Power BI raises InvalidValueFormat
+        ("Failed to convert the value 'dax' to ... PartitionSourceType") on open.
+      - `mode: calculated` is not a valid ModeType (import, directQuery, dual).
+        Calculated partitions use `mode: import`.
+
+    Rewrites both to the valid form and guarantees every calculated partition
+    carries a `mode: import` line — the known-good shape every fixture uses.
+    """
+    text = _DAX_PARTITION_SOURCE_RE.sub(r"\1calculated\2", tmdl)
+    text = _INVALID_MODE_RE.sub(r"\1import\2", text)
+    return _ensure_calculated_partition_mode(text)
+
+
+def _ensure_calculated_partition_mode(tmdl: str) -> str:
+    """Insert `mode: import` after any calculated partition header lacking one.
+
+    The mode line is indented one tab deeper than its `partition` header. A
+    header already followed by a `mode:` line is left untouched (idempotent).
+    """
+    lines = tmdl.split("\n")
+    out: list[str] = []
+    for idx, line in enumerate(lines):
+        out.append(line)
+        header = _CALC_PARTITION_HEADER_RE.match(line)
+        if not header:
+            continue
+        nxt = lines[idx + 1] if idx + 1 < len(lines) else ""
+        if _MODE_LINE_RE.match(nxt):
+            continue
+        out.append(f"{header.group('indent')}\tmode: import")
+    return "\n".join(out)
+
 
 def _insert_measures(existing: str, measures: list[ModelMeasure]) -> str:
     """Splice measure blocks into existing TMDL before the first partition block.
@@ -103,14 +209,27 @@ def _insert_measures(existing: str, measures: list[ModelMeasure]) -> str:
     return "\n".join(new_lines).rstrip() + "\n"
 
 
+def _quote_name(name: str) -> str:
+    """Quote a TMDL object-header name only when it contains whitespace.
+
+    `table X`/`column X`/`ref table X` headers take exactly one token — a
+    multi-word name must be quoted ('Economic Data') or Power BI Desktop
+    fails to parse it ("the object name is followed by an invalid token").
+    Property VALUES like `sourceColumn:` are a different grammar position —
+    verified against real Power BI exports, they stay unquoted even with
+    spaces — so this must only be applied to header lines, not values.
+    """
+    return f"'{name}'" if re.search(r"\s", name) else name
+
+
 def _build_minimal_tmdl(
     table_name: str,
     columns: list[ModelColumn],
     measures: list[ModelMeasure],
 ) -> str:
-    """Build a complete table TMDL with columns and measures but no data partition."""
+    """Build a complete table TMDL with columns, measures, and a valid partition."""
     parts: list[str] = [
-        f"table {table_name}",
+        f"table {_quote_name(table_name)}",
         f"\tlineageTag: {_new_guid()}",
         "",
     ]
@@ -119,11 +238,30 @@ def _build_minimal_tmdl(
         parts.append("")
     for col in columns:
         parts += [
-            f"\tcolumn {col.name}",
+            f"\tcolumn {_quote_name(col.name)}",
             f"\t\tdataType: {col.data_type}",
             f"\t\tlineageTag: {_new_guid()}",
             f"\t\tsummarizeBy: none",
             f"\t\tsourceColumn: {col.name}",
+            "",
+        ]
+    if not columns:
+        parts += [
+            f"\tpartition {_quote_name(table_name)} = calculated",
+            f"\t\tmode: import",
+            f"\t\tsource = {{BLANK()}}",
+            "",
+        ]
+    else:
+        col_names = ", ".join(f'"{col.name}"' for col in columns)
+        parts += [
+            f"\tpartition {_quote_name(table_name)} = m",
+            f"\t\tmode: import",
+            f"\t\tsource =",
+            f"\t\t\tlet",
+            f"\t\t\t\tSource = #table({{{col_names}}}, {{}})",
+            f"\t\t\tin",
+            f"\t\t\t\tSource",
             "",
         ]
     return "\n".join(parts)
@@ -169,12 +307,12 @@ def _register_ref_tables(semantic_model_dir: Path, table_names: list[str]) -> No
 
     to_add = [
         name for name in table_names
-        if f"ref table {name}" not in existing
+        if f"ref table {_quote_name(name)}" not in existing
     ]
     if not to_add:
         return
 
-    ref_lines = [f"ref table {name}" for name in to_add]
+    ref_lines = [f"ref table {_quote_name(name)}" for name in to_add]
 
     # Insert before `ref cultureInfo` if present, otherwise before the last blank line.
     insert_at = len(lines)
@@ -187,5 +325,133 @@ def _register_ref_tables(semantic_model_dir: Path, table_names: list[str]) -> No
     model_tmdl.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
 
 
+_REF_TABLE_LINE_RE = re.compile(r"^[ \t]*ref[ \t]+table[ \t]+(?P<name>.+?)[ \t]*$")
+
+
+def _sync_ref_tables(semantic_model_dir: Path, surviving_tables: set[str]) -> None:
+    """Synchronize `ref table <Name>` lines in model.tmdl with surviving tables on disk.
+
+    Removes any `ref table` line whose table is not in surviving_tables, and adds
+    missing `ref table` lines for any surviving table not yet referenced.
+    """
+    model_tmdl = semantic_model_dir / "definition" / "model.tmdl"
+    if not model_tmdl.exists():
+        return
+
+    existing = model_tmdl.read_text(encoding="utf-8")
+    lines = existing.splitlines()
+
+    new_lines: list[str] = []
+    referenced_tables: set[str] = set()
+
+    for line in lines:
+        m = _REF_TABLE_LINE_RE.match(line)
+        if m:
+            raw = m.group("name").strip()
+            tbl_name = (
+                raw[1:-1]
+                if (raw.startswith("'") and raw.endswith("'"))
+                or (raw.startswith('"') and raw.endswith('"'))
+                else raw
+            )
+            if tbl_name in surviving_tables:
+                new_lines.append(line)
+                referenced_tables.add(tbl_name)
+            # Stale table reference is pruned
+        else:
+            new_lines.append(line)
+
+    to_add = [t for t in sorted(surviving_tables) if t not in referenced_tables]
+    if to_add:
+        ref_lines = [f"ref table {_quote_name(t)}" for t in to_add]
+        insert_at = len(new_lines)
+        for i, line in enumerate(new_lines):
+            if line.startswith("ref cultureInfo"):
+                insert_at = i
+                break
+        new_lines = new_lines[:insert_at] + ref_lines + new_lines[insert_at:]
+
+    model_tmdl.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
+
 def _new_guid() -> str:
-    return uuid.uuid4().hex[:20]
+    return str(uuid.uuid4())
+
+
+_M_PARTITION_RE = re.compile(
+    r"^[ \t]*partition[ \t]+.+?[ \t]*=[ \t]*m\b", re.IGNORECASE | re.MULTILINE
+)
+_PBI_QUERY_ORDER_RE = re.compile(
+    r"^(?P<indent>[ \t]*)annotation[ \t]+PBI_QueryOrder[ \t]*=[ \t]*(?P<val>\[.*?\])[ \t]*$",
+    re.MULTILINE,
+)
+
+
+def _sync_pbi_query_order(semantic_model_dir: Path) -> None:
+    """Synchronize `annotation PBI_QueryOrder` in model.tmdl with surviving M-partitioned tables.
+
+    Power BI Desktop's mashup engine uses PBI_QueryOrder to construct Section1 formulas.
+    If PBI_QueryOrder contains deleted tables or omits active M-partitioned tables,
+    Power BI Desktop fails to load Mashup cubes with:
+    'Model validation failed. A composite model cannot be used with entity based query sources'.
+
+    This function:
+    - Scans definition/tables/*.tmdl for tables with an M partition (`partition ... = m`).
+    - Removes non-existent or non-M tables from PBI_QueryOrder.
+    - Appends any surviving M-partitioned tables not yet listed.
+    - Updates model.tmdl in place (or inserts PBI_QueryOrder if M tables exist).
+    """
+    definition = semantic_model_dir / "definition"
+    tables_dir = definition / "tables"
+    model_tmdl = definition / "model.tmdl"
+
+    if not tables_dir.exists() or not model_tmdl.exists():
+        return
+
+    # Find all tables with partition ... = m
+    surviving_m_tables: set[str] = set()
+    for table_file in tables_dir.glob("*.tmdl"):
+        try:
+            content = table_file.read_text(encoding="utf-8")
+            if _M_PARTITION_RE.search(content):
+                surviving_m_tables.add(table_file.stem)
+        except Exception:
+            continue
+
+    existing_content = model_tmdl.read_text(encoding="utf-8")
+    match = _PBI_QUERY_ORDER_RE.search(existing_content)
+
+    if match:
+        try:
+            old_list = json.loads(match.group("val"))
+            if not isinstance(old_list, list):
+                old_list = []
+        except Exception:
+            old_list = []
+
+        # Keep existing order for surviving M tables, prune deleted/non-M tables
+        new_list = [t for t in old_list if t in surviving_m_tables]
+        for t in sorted(surviving_m_tables):
+            if t not in new_list:
+                new_list.append(t)
+
+        indent = match.group("indent")
+        replacement_line = f"{indent}annotation PBI_QueryOrder = {json.dumps(new_list)}"
+        new_content = (
+            existing_content[: match.start()]
+            + replacement_line
+            + existing_content[match.end() :]
+        )
+        if new_content != existing_content:
+            model_tmdl.write_text(new_content, encoding="utf-8")
+    elif surviving_m_tables:
+        new_list = sorted(surviving_m_tables)
+        lines = existing_content.splitlines()
+        insert_at = len(lines)
+        for i, line in enumerate(lines):
+            if line.lstrip().startswith("ref table") or line.lstrip().startswith("ref cultureInfo"):
+                insert_at = i
+                break
+        annotation_line = f"annotation PBI_QueryOrder = {json.dumps(new_list)}"
+        lines.insert(insert_at, annotation_line)
+        model_tmdl.write_text("\n".join(lines) + "\n", encoding="utf-8")

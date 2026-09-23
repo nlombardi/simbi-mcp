@@ -1,4 +1,4 @@
-"""PBIR Report folder writer — generates only the .Report half of a .pbip project.
+"""PBIR Report folder writer: generates only the .Report half of a .pbip project.
 
 The .pbip and .SemanticModel are produced by Power BI Desktop / Power BI MCP;
 SimBI never creates or touches them. This writer outputs only:
@@ -8,15 +8,28 @@ SimBI never creates or touches them. This writer outputs only:
   - <name>.Report/definition/pages/pages.json
   - <name>.Report/definition/pages/<page-guid>/page.json
   - <name>.Report/definition/pages/<page-guid>/visuals/<visual-guid>/visual.json
-  - <name>.Report/StaticResources/SharedResources/BaseThemes/<theme-name>.json
+  - <name>.Report/StaticResources/SharedResources/BaseThemes/CY25SU10.json
 """
 from __future__ import annotations
 
 import json
 import shutil
 import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from simbi_mcp.pbir.pbir_validator import validate_pbir_report
+
+BASE_THEME_NAME = "CY25SU10"
+
+
+@dataclass
+class PageSpec:
+    visuals: list[dict[str, Any]] = field(default_factory=list)
+    display_name: str = "Page 1"
+    guid: str | None = None
+    background: list[dict[str, Any]] | None = None
 
 _STATIC_DIR = Path(__file__).parent / "static"
 
@@ -26,31 +39,26 @@ _VERSION_SCHEMA = "https://developer.microsoft.com/json-schemas/fabric/item/repo
 _REPORT_SCHEMA = "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/report/3.0.0/schema.json"
 
 
-def _report_json(theme_name: str) -> dict[str, Any]:
+def _report_json() -> dict[str, Any]:
     return {
         "$schema": _REPORT_SCHEMA,
         "themeCollection": {
             "baseTheme": {
-                "name": theme_name,
+                "name": BASE_THEME_NAME,
                 "reportVersionAtImport": {"visual": "2.1.0", "report": "3.0.0", "page": "2.3.0"},
                 "type": "SharedResources",
             }
-        },
-        "objects": {
-            "section": [
-                {
-                    "properties": {
-                        "verticalAlignment": {"expr": {"Literal": {"Value": "'Top'"}}}
-                    }
-                }
-            ]
         },
         "resourcePackages": [
             {
                 "name": "SharedResources",
                 "type": "SharedResources",
                 "items": [
-                    {"name": theme_name, "path": f"BaseThemes/{theme_name}.json", "type": "BaseTheme"}
+                    {
+                        "name": BASE_THEME_NAME,
+                        "path": f"BaseThemes/{BASE_THEME_NAME}.json",
+                        "type": "BaseTheme",
+                    }
                 ],
             }
         ],
@@ -67,33 +75,30 @@ def _report_json(theme_name: str) -> dict[str, Any]:
 
 def write_report(
     *,
-    visuals: list[dict[str, Any]],
+    pages: list[PageSpec],
     report_name: str,
     output_dir: Path,
     semantic_model_rel_path: str | None = None,
     theme: dict[str, Any] | None = None,
+    bookmarks: list[dict[str, Any]] | None = None,
 ) -> Path:
     """Write the PBIR Report folder and return its path.
 
     The folder is named <report_name>.Report and created inside output_dir.
     semantic_model_rel_path defaults to ../<report_name>.SemanticModel, which
-    places it as a sibling of the Report folder — the standard Power BI layout.
+    places it as a sibling of the Report folder: the standard Power BI layout.
 
     `theme` is a fully-resolved PBIR theme dict (typically from
-    simbi_mcp.pbir.theme.resolve_theme). When None, the static SimBIDefault
-    theme is loaded from disk — preserving backward compatibility for callers
+    simbi_mcp.pbir.theme.resolve_theme). When None, the static CY25SU10/SimBI
+    theme is loaded from disk: preserving backward compatibility for callers
     that haven't been updated.
     """
     if semantic_model_rel_path is None:
         semantic_model_rel_path = f"../{report_name}.SemanticModel"
 
     if theme is None:
-        # Lazy import keeps theme module out of writer's import path for callers
-        # that pass an explicit theme dict (the common case from emit_pbir).
         from simbi_mcp.pbir.theme import resolve_theme
         theme = resolve_theme(user_theme_path=None)
-
-    theme_name = theme.get("name") or "SimBIDefault"
 
     report_dir = output_dir / f"{report_name}.Report"
 
@@ -109,7 +114,18 @@ def write_report(
     if base_themes_dir.exists():
         shutil.rmtree(base_themes_dir)
 
-    page_guid = _new_guid()
+    # Wipe any previous bookmarks/ so renamed or removed bookmarks don't leave
+    # orphan files that Power BI Desktop would still load.
+    bookmarks_dir = report_dir / "definition" / "bookmarks"
+    if bookmarks_dir.exists():
+        shutil.rmtree(bookmarks_dir)
+
+    # Assign GUIDs to any pages that don't have one yet.
+    for p in pages:
+        if p.guid is None:
+            p.guid = _new_guid()
+
+    page_guids = [p.guid for p in pages]
 
     _write_json(
         report_dir / "definition.pbir",
@@ -119,44 +135,74 @@ def write_report(
         report_dir / "definition" / "version.json",
         {"$schema": _VERSION_SCHEMA, "version": "2.0.0"},
     )
-    _write_json(report_dir / "definition" / "report.json", _report_json(theme_name))
+    _write_json(report_dir / "definition" / "report.json", _report_json())
     _write_json(
         report_dir / "definition" / "pages" / "pages.json",
-        {"$schema": _PAGES_SCHEMA, "pageOrder": [page_guid], "activePageName": page_guid},
+        {"$schema": _PAGES_SCHEMA, "pageOrder": page_guids, "activePageName": page_guids[0]},
     )
-    _write_json(
-        report_dir / "definition" / "pages" / page_guid / "page.json",
-        {
+
+    for page in pages:
+        page_json: dict[str, Any] = {
             "$schema": _PAGE_SCHEMA,
-            "name": page_guid,
-            "displayName": "Page 1",
+            "name": page.guid,
+            "displayName": page.display_name,
             "displayOption": "FitToPage",
             "height": 720,
             "width": 1280,
-        },
-    )
-
-    for i, visual in enumerate(visuals):
-        try:
-            visual_name: str = visual["name"]
-        except KeyError as exc:
-            raise ValueError(
-                f"visual dict at index {i} is missing required key 'name'"
-            ) from exc
+        }
+        if page.background:
+            page_json["objects"] = {"background": page.background}
         _write_json(
-            report_dir
-            / "definition"
-            / "pages"
-            / page_guid
-            / "visuals"
-            / visual_name
-            / "visual.json",
-            visual,
+            report_dir / "definition" / "pages" / page.guid / "page.json",
+            page_json,
         )
+        for i, visual in enumerate(page.visuals):
+            try:
+                visual_name: str = visual["name"]
+            except KeyError as exc:
+                raise ValueError(
+                    f"visual dict at index {i} is missing required key 'name'"
+                ) from exc
+            clean = {
+                k: v for k, v in visual.items()
+                if k not in ("simbiId", "simbiButtonAction", "simbiStyling")
+            }
+            pos = clean.get("position")
+            if isinstance(pos, dict):
+                coords = ("x", "y", "width", "height", "z", "tabOrder")
+                clean["position"] = {
+                    k: round(float(v)) if k in coords and v is not None else v
+                    for k, v in pos.items()
+                }
+            _write_json(
+                report_dir
+                / "definition"
+                / "pages"
+                / page.guid
+                / "visuals"
+                / visual_name
+                / "visual.json",
+                clean,
+            )
 
-    theme_dest = base_themes_dir / f"{theme_name}.json"
+    if bookmarks:
+        bdir = report_dir / "definition" / "bookmarks"
+        names = [b["name"] for b in bookmarks]
+        _write_json(bdir / "bookmarks.json", {
+            "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmarksMetadata/1.0.0/schema.json",
+            "items": [{"name": n} for n in names],
+        })
+        for b in bookmarks:
+            _write_json(bdir / f"{b['name']}.bookmark.json", b)
+
+    theme_dest = base_themes_dir / f"{BASE_THEME_NAME}.json"
     theme_dest.parent.mkdir(parents=True, exist_ok=True)
-    theme_dest.write_text(json.dumps(theme, indent=2), encoding="utf-8")
+    resolved_theme = dict(theme)
+    resolved_theme["name"] = BASE_THEME_NAME
+    theme_dest.write_text(json.dumps(resolved_theme, indent=2), encoding="utf-8")
+
+    # Strict Power BI Desktop PBIR validation
+    validate_pbir_report(report_dir, raise_on_error=True)
 
     return report_dir
 

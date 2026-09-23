@@ -8,6 +8,7 @@ import pytest
 
 from simbi_mcp.pbir.theme import (
     InvalidThemeError,
+    build_theme_schema_text,
     deep_merge,
     resolve_theme,
 )
@@ -119,3 +120,43 @@ def test_resolve_theme_user_can_override_name(tmp_path: Path) -> None:
     user.write_text(json.dumps({"name": "AcmeBrand"}))
     theme = resolve_theme(user_theme_path=user)
     assert theme["name"] == "AcmeBrand"
+
+
+# ---------- build_theme_schema_text ----------
+
+
+def test_theme_schema_text_documents_resolution_order() -> None:
+    text = build_theme_schema_text()
+    assert "CY25SU10" in text
+    assert "SimBI" in text
+    assert "deep-merge" in text.lower() or "deep merge" in text.lower()
+
+
+def test_theme_schema_text_reflects_real_default_data_colors() -> None:
+    # Generated from the actual static theme file — must never drift from it.
+    text = build_theme_schema_text()
+    theme = resolve_theme(user_theme_path=None)
+    assert theme["dataColors"][0] in text
+
+
+def test_theme_schema_text_lists_visual_styles_simbi_already_sets() -> None:
+    text = build_theme_schema_text()
+    theme = resolve_theme(user_theme_path=None)
+    for vtype in theme["visualStyles"]:
+        if vtype == "*":
+            continue
+        assert vtype in text, f"visualStyles type {vtype!r} missing from schema text"
+
+
+def test_theme_schema_text_lists_top_level_keys() -> None:
+    text = build_theme_schema_text()
+    for key in ("dataColors", "textClasses", "visualStyles", "good", "neutral", "bad"):
+        assert key in text
+
+
+def test_theme_schema_text_explains_per_visual_override_boundary() -> None:
+    # Must connect the report-wide theme to the per-visual WYSIWYG styling
+    # contract documented by get_vocabulary, per the design's own intent.
+    text = build_theme_schema_text()
+    assert "data-pbi-fill" in text or "data-pbi-stroke" in text
+    assert "get_vocabulary" in text

@@ -13,28 +13,6 @@ _VISUAL_SCHEMA = (
 )
 
 
-@pytest.fixture
-def schema() -> ModelSchema:
-    return ModelSchema(
-        tables=[ModelTable(name="sales", columns=[ModelColumn(name="Region"), ModelColumn(name="OrderDate")])],
-        measures=[
-            ModelMeasure(
-                name="Total Revenue",
-                table="sales",
-                expression="SUM(sales[Revenue])",
-                return_type="currency",
-            ),
-            ModelMeasure(
-                name="Order Count",
-                table="sales",
-                expression="COUNTROWS(sales)",
-                return_type="integer",
-            ),
-        ],
-        relationships=[],
-    )
-
-
 def _card_node(**extra: str) -> VisualNode:
     attrs = {"data-pbi": "card", "data-pbi-measure": "Total Revenue", **extra}
     return VisualNode(x=24.0, y=24.0, width=400.0, height=104.0, attrs=attrs)
@@ -57,12 +35,18 @@ def test_card_has_measure_projection(schema: ModelSchema) -> None:
 def test_card_position(schema: ModelSchema) -> None:
     result = build_visual_json(_card_node(), z_order=1000, schema=schema)
     pos = result["position"]
-    assert pos["x"] == 24.0
-    assert pos["y"] == 24.0
+    assert isinstance(pos["x"], int) and not isinstance(pos["x"], bool)
+    assert pos["x"] == 24
+    assert isinstance(pos["y"], int) and not isinstance(pos["y"], bool)
+    assert pos["y"] == 24
+    assert isinstance(pos["z"], int) and not isinstance(pos["z"], bool)
     assert pos["z"] == 1000
+    assert isinstance(pos["tabOrder"], int) and not isinstance(pos["tabOrder"], bool)
     assert pos["tabOrder"] == 1000
-    assert pos["width"] == 400.0
-    assert pos["height"] == 104.0
+    assert isinstance(pos["width"], int) and not isinstance(pos["width"], bool)
+    assert pos["width"] == 400
+    assert isinstance(pos["height"], int) and not isinstance(pos["height"], bool)
+    assert pos["height"] == 104
 
 
 def test_card_schema_url(schema: ModelSchema) -> None:
@@ -701,3 +685,273 @@ def test_shape_map_with_topojson(rich_schema: ModelSchema) -> None:
     result = build_visual_json(node, z_order=0, schema=rich_schema)
     assert result["visual"]["visualType"] == "shapeMap"
     assert "mapShape" in result["visual"]["objects"]
+
+
+def test_visual_carries_stable_id(schema: ModelSchema) -> None:
+    node = VisualNode(
+        x=0, y=0, width=100, height=100,
+        attrs={"data-pbi": "card", "data-pbi-measure": "Total Revenue", "data-pbi-id": "kpiRevenue"},
+    )
+    result = build_visual_json(node, z_order=0, schema=schema)
+    assert result["simbiId"] == "kpiRevenue"
+
+
+def test_visual_without_id_has_no_simbi_id(schema: ModelSchema) -> None:
+    node = VisualNode(
+        x=0, y=0, width=100, height=100,
+        attrs={"data-pbi": "card", "data-pbi-measure": "Total Revenue"},
+    )
+    result = build_visual_json(node, z_order=0, schema=schema)
+    assert "simbiId" not in result
+
+
+def test_visual_hidden_flag(schema: ModelSchema) -> None:
+    node = VisualNode(x=0, y=0, width=100, height=100, attrs={
+        "data-pbi": "card", "data-pbi-measure": "Total Revenue", "data-pbi-hidden": "true"})
+    result = build_visual_json(node, z_order=0, schema=schema)
+    assert result["isHidden"] is True
+
+
+def test_visual_not_hidden_by_default(schema: ModelSchema) -> None:
+    node = VisualNode(x=0, y=0, width=100, height=100, attrs={
+        "data-pbi": "card", "data-pbi-measure": "Total Revenue"})
+    result = build_visual_json(node, z_order=0, schema=schema)
+    assert "isHidden" not in result
+
+
+def test_visual_hidden_false_omits_key(schema: ModelSchema) -> None:
+    node = VisualNode(x=0, y=0, width=100, height=100, attrs={
+        "data-pbi": "card", "data-pbi-measure": "Total Revenue", "data-pbi-hidden": "false"})
+    result = build_visual_json(node, z_order=0, schema=schema)
+    assert "isHidden" not in result
+
+
+def test_between_slicer_shows_slider(schema: ModelSchema) -> None:
+    node = VisualNode(
+        x=0, y=0, width=300, height=44,
+        attrs={"data-pbi": "slicer", "data-pbi-field": "sales[Region]", "data-pbi-style": "between"},
+    )
+    result = build_visual_json(node, z_order=0, schema=schema)
+    objs = result["visual"]["objects"]
+    # mode still Between
+    assert objs["data"][0]["properties"]["mode"] == {"expr": {"Literal": {"Value": "'Between'"}}}
+    # slider track is shown -> renders draggable handles, not just input boxes
+    assert objs["slider"][0]["properties"]["show"] == {"expr": {"Literal": {"Value": "true"}}}
+
+
+def test_dropdown_slicer_has_no_slider(schema: ModelSchema) -> None:
+    node = VisualNode(
+        x=0, y=0, width=300, height=44,
+        attrs={"data-pbi": "slicer", "data-pbi-field": "sales[Region]", "data-pbi-style": "dropdown"},
+    )
+    result = build_visual_json(node, z_order=0, schema=schema)
+    assert "slider" not in result["visual"]["objects"]
+
+
+def test_slicer_height_floored_to_minimum(schema: ModelSchema) -> None:
+    node = VisualNode(x=0, y=0, width=240, height=30, attrs={
+        "data-pbi": "slicer", "data-pbi-field": "sales[Region]"})
+    result = build_visual_json(node, z_order=0, schema=schema)
+    assert result["position"]["height"] == 40  # bumped up from 30
+
+
+def test_slicer_tall_height_unchanged(schema: ModelSchema) -> None:
+    node = VisualNode(x=0, y=0, width=240, height=200, attrs={
+        "data-pbi": "slicer", "data-pbi-field": "sales[Region]"})
+    result = build_visual_json(node, z_order=0, schema=schema)
+    assert result["position"]["height"] == 200  # not shrunk
+
+
+def test_chart_height_not_floored(schema: ModelSchema) -> None:
+    node = VisualNode(x=0, y=0, width=400, height=10, attrs={
+        "data-pbi": "columnChart", "data-pbi-axis": "sales[Region]", "data-pbi-values": "Total Revenue"})
+    result = build_visual_json(node, z_order=0, schema=schema)
+    assert result["position"]["height"] == 10  # charts have no floor
+
+
+def test_field_param_height_floored(schema: ModelSchema) -> None:
+    node = VisualNode(x=0, y=0, width=400, height=20, attrs={
+        "data-pbi": "field-param", "data-pbi-param-name": "Indicator",
+        "data-pbi-measures": "Total Revenue, Order Count"})
+    result = build_visual_json(node, z_order=0, schema=schema)
+    assert result["position"]["height"] == 40
+
+
+def test_text_height_floored(schema: ModelSchema) -> None:
+    node = VisualNode(x=0, y=0, width=300, height=14, attrs={
+        "data-pbi": "text", "data-pbi-text": "Hello"})
+    r = build_visual_json(node, z_order=0, schema=schema)
+    assert r["position"]["height"] == 24
+
+
+def test_between_slicer_taller_floor(schema: ModelSchema) -> None:
+    node = VisualNode(x=0, y=0, width=300, height=30, attrs={
+        "data-pbi": "slicer", "data-pbi-field": "sales[Region]", "data-pbi-style": "between"})
+    r = build_visual_json(node, z_order=0, schema=schema)
+    assert r["position"]["height"] == 56
+
+
+def test_dropdown_slicer_floor_still_40(schema: ModelSchema) -> None:
+    node = VisualNode(x=0, y=0, width=300, height=20, attrs={
+        "data-pbi": "slicer", "data-pbi-field": "sales[Region]", "data-pbi-style": "dropdown"})
+    r = build_visual_json(node, z_order=0, schema=schema)
+    assert r["position"]["height"] == 40
+
+
+def test_slicer_header_off(schema: ModelSchema) -> None:
+    node = VisualNode(x=0, y=0, width=240, height=44, attrs={
+        "data-pbi": "slicer", "data-pbi-field": "sales[Region]"})
+    r = build_visual_json(node, z_order=0, schema=schema)
+    hdr = r["visual"]["objects"]["header"][0]["properties"]["show"]
+    assert hdr == {"expr": {"Literal": {"Value": "false"}}}
+
+
+def test_chart_builtin_title_off(schema: ModelSchema) -> None:
+    node = VisualNode(x=0, y=0, width=400, height=300, attrs={
+        "data-pbi": "clusteredColumnChart", "data-pbi-axis": "sales[Region]",
+        "data-pbi-values": "Total Revenue", "data-pbi-series": "sales[Region]"})
+    r = build_visual_json(node, z_order=0, schema=schema)
+    t = r["visual"]["visualContainerObjects"]["title"][0]["properties"]["show"]
+    assert t == {"expr": {"Literal": {"Value": "false"}}}
+
+
+def test_card_has_no_title_off(schema: ModelSchema) -> None:
+    # non-chart types should not get the chart title-off
+    node = VisualNode(x=0, y=0, width=100, height=100, attrs={
+        "data-pbi": "card", "data-pbi-measure": "Total Revenue"})
+    r = build_visual_json(node, z_order=0, schema=schema)
+    vco = r["visual"].get("visualContainerObjects", {})
+    assert "title" not in vco
+
+
+def test_between_slicer_responsive_off(schema: ModelSchema) -> None:
+    node = VisualNode(x=0, y=0, width=320, height=56, attrs={
+        "data-pbi": "slicer", "data-pbi-field": "sales[Region]", "data-pbi-style": "between"})
+    r = build_visual_json(node, z_order=0, schema=schema)
+    g = r["visual"]["objects"]["general"][0]["properties"]["responsive"]
+    assert g == {"expr": {"Literal": {"Value": "false"}}}
+
+
+def test_dropdown_slicer_no_responsive_card(schema: ModelSchema) -> None:
+    node = VisualNode(x=0, y=0, width=240, height=44, attrs={
+        "data-pbi": "slicer", "data-pbi-field": "sales[Region]", "data-pbi-style": "dropdown"})
+    r = build_visual_json(node, z_order=0, schema=schema)
+    assert "general" not in r["visual"]["objects"]
+
+
+def test_text_static_title(schema: ModelSchema) -> None:
+    node = VisualNode(x=24, y=160, width=600, height=40, attrs={
+        "data-pbi": "text", "data-pbi-text": "Sales Report", "data-pbi-role": "title"})
+    r = build_visual_json(node, z_order=0, schema=schema)
+    runs = r["visual"]["objects"]["general"][0]["properties"]["paragraphs"][0]["textRuns"]
+    assert runs[0]["value"] == "Sales Report"
+    assert "expr" not in runs[0]
+
+
+def test_text_dynamic_title_emits_measure_expr() -> None:
+    schema = ModelSchema(
+        tables=[ModelTable(name="sales", columns=[ModelColumn(name="Region")])],
+        measures=[
+            ModelMeasure(name="Total Revenue", table="sales",
+                         expression="SUM(sales[Revenue])", return_type="currency"),
+            ModelMeasure(name="Chart Title Label", table="sales",
+                         expression='SELECTEDVALUE(Indicator[Indicator], "All")',
+                         return_type="text"),
+        ],
+        relationships=[],
+    )
+    node = VisualNode(x=24, y=160, width=600, height=40, attrs={
+        "data-pbi": "text",
+        "data-pbi-text": "GDP Growth",
+        "data-pbi-role": "title",
+        "data-pbi-title-measure": "Chart Title Label",
+    })
+    r = build_visual_json(node, z_order=0, schema=schema)
+    runs = r["visual"]["objects"]["general"][0]["properties"]["paragraphs"][0]["textRuns"]
+    assert "value" not in runs[0], "static value should not be emitted when measure is set"
+    expr = runs[0]["expr"]["Measure"]
+    assert expr["Property"] == "Chart Title Label"
+    assert expr["Expression"]["SourceRef"]["Entity"] == "sales"
+
+
+from simbi_mcp.pbir.styling import literal, solid
+
+_CARD_STYLES = {
+    "backgroundColor": "rgb(255, 255, 255)",
+    "borderWidth": "0px",
+    "borderStyle": "none",
+    "borderColor": "rgb(0, 0, 0)",
+    "borderRadius": "12px",
+    "boxShadow": "rgba(0, 0, 0, 0.1) 0px 1px 3px 0px",
+}
+
+
+def test_card_gets_container_styling(schema) -> None:
+    node = VisualNode(
+        x=0, y=0, width=200, height=100,
+        attrs={"data-pbi": "card", "data-pbi-measure": "Total Revenue"},
+        styles=_CARD_STYLES,
+    )
+    container = build_visual_json(node, z_order=0, schema=schema)
+    vco = container["visual"]["visualContainerObjects"]
+    assert vco["background"][0]["properties"]["color"] == solid("#FFFFFF")
+    assert vco["border"][0]["properties"]["radius"] == literal("12D")
+    assert vco["dropShadow"][0]["properties"]["preset"] == literal("'Custom'")
+    assert container["simbiStyling"]["honored"]
+
+
+def test_unstyled_card_emits_no_container_styling(schema) -> None:
+    node = VisualNode(
+        x=0, y=0, width=200, height=100,
+        attrs={"data-pbi": "card", "data-pbi-measure": "Total Revenue"},
+        styles={"backgroundColor": "rgba(0, 0, 0, 0)", "boxShadow": "none"},
+    )
+    container = build_visual_json(node, z_order=0, schema=schema)
+    vco = container["visual"].get("visualContainerObjects", {})
+    assert "background" not in vco and "border" not in vco and "dropShadow" not in vco
+    assert "simbiStyling" not in container
+
+
+def test_chart_styling_does_not_clobber_title_off(schema) -> None:
+    node = VisualNode(
+        x=0, y=0, width=300, height=200,
+        attrs={
+            "data-pbi": "columnChart",
+            "data-pbi-axis": "sales[Region]",
+            "data-pbi-values": "Total Revenue",
+        },
+        styles=_CARD_STYLES,
+    )
+    container = build_visual_json(node, z_order=0, schema=schema)
+    vco = container["visual"]["visualContainerObjects"]
+    assert vco["title"][0]["properties"]["show"] == literal("false")
+    assert "background" in vco
+
+
+def test_shape_gets_geometry_styling_not_container(schema) -> None:
+    node = VisualNode(
+        x=0, y=0, width=300, height=80,
+        attrs={"data-pbi": "shape"},
+        styles={
+            "backgroundColor": "rgb(30, 58, 138)",
+            "borderWidth": "0px", "borderStyle": "none",
+            "borderColor": "rgb(0, 0, 0)", "borderRadius": "8px",
+            "boxShadow": "none",
+        },
+    )
+    container = build_visual_json(node, z_order=0, schema=schema)
+    objs = container["visual"]["objects"]
+    assert objs["fill"][0]["properties"]["fillColor"] == solid("#1E3A8A")
+    assert objs["shape"][0]["properties"]["tileShape"] == literal("'rectangle'")
+    assert "roundEdge" not in objs["shape"][0]["properties"]
+    assert "visualContainerObjects" not in container["visual"]
+
+
+def test_shape_fill_attr_beats_css(schema) -> None:
+    node = VisualNode(
+        x=0, y=0, width=300, height=80,
+        attrs={"data-pbi": "shape", "data-pbi-fill": "#FF0000"},
+        styles={"backgroundColor": "rgb(30, 58, 138)"},
+    )
+    container = build_visual_json(node, z_order=0, schema=schema)
+    assert container["visual"]["objects"]["fill"][0]["properties"]["fillColor"] == solid("#FF0000")
