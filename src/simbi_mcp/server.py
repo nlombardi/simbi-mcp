@@ -1,8 +1,11 @@
 """SimBI MCP server — exposes Phase 1-3 pipelines as MCP tools.
 
 Tools (typical call order):
-  parse_schema   TMDL str → ModelSchema JSON
-  emit_report    HTML + schema JSON → PBIR folder path
+  analyze_data_source    CSV/Excel path → structure profile JSON (Path 1, before authoring TMDL)
+  write_semantic_model   TMDL str + pbip_path → persists tables/measures (Path 1 only)
+  parse_schema           TMDL str → ModelSchema JSON
+  get_theme_schema       () → theme_path JSON schema (call before writing a custom theme)
+  emit_report            HTML + schema JSON → multi-line emission report (PBIR folder path + warnings)
 
 Resources:
   simbi://annotation-vocabulary   data-pbi-* spec + CSS class catalog
@@ -20,8 +23,12 @@ from simbi_mcp.mockup.validator import (
     count_annotated_visuals,
     validate_mockup,
 )
-from simbi_mcp.pbir.emitter import emit_pbir
+from simbi_mcp.pbir.emitter import EmitResult, emit_pbir
+from simbi_mcp.pbir.model_writer import write_semantic_model as _write_semantic_model
+from simbi_mcp.pbir.reserved_names import sanitize_schema, sanitize_semantic_model_dir
 from simbi_mcp.pbir.semantic_patcher import patch_semantic_model_measures
+from simbi_mcp.pbir.theme import build_theme_schema_text
+from simbi_mcp.semantic.data_profile import profile_file
 from simbi_mcp.semantic.schema_reader import parse_tmdl_schema
 from simbi_mcp.types import ModelSchema
 
@@ -38,13 +45,13 @@ mcp: FastMCP = FastMCP(
         "  1. The user must first create a blank .pbip in Power BI Desktop\n"
         "     (File → New → File → Save As → Power BI Project format) and\n"
         "     then CLOSE Power BI Desktop.\n"
-        "  2. INSPECT THE SOURCE BEFORE WRITING ANY DAX. Open the CSV/Excel\n"
-        "     and confirm:\n"
-        "       - Exact column names and dtypes (case-sensitive). Do not guess.\n"
-        "       - SHAPE: long (one row per fact, single value column with a\n"
-        "         key column like Year/Period) vs WIDE (one column per period,\n"
-        "         e.g. [2024], [2025], [2026]). Most economic / financial\n"
-        "         exports are WIDE.\n"
+        "  2. INSPECT THE SOURCE BEFORE WRITING ANY DAX. Call\n"
+        "     SimBI.analyze_data_source(path) — do NOT open the CSV/Excel with\n"
+        "     a generic file tool, and do NOT guess column names/dtypes.\n"
+        "       - Use the returned column names and TMDL types exactly as given.\n"
+        "       - SHAPE: check the table-level hints for a WIDE-format warning\n"
+        "         (one column per period, e.g. [2024], [2025], [2026]). Most\n"
+        "         economic / financial exports are WIDE.\n"
         "       - If WIDE: your TMDL MUST include an unpivoted table (Power\n"
         "         Query M `Table.UnpivotOtherColumns`) producing Year + Value\n"
         "         columns. Then aggregate Value with a FILTER on Year. Do NOT\n"
@@ -58,25 +65,45 @@ mcp: FastMCP = FastMCP(
         "  3. Write TMDL yourself from the inspected source. Include:\n"
         "       - A table block with the correct column names and dataTypes\n"
         "         (string, int64, double, dateTime)\n"
+        "       - NAMING: a table may NOT be named the reserved word 'Measures'\n"
+        "         (Power BI refuses to open the .pbip: \"the name of the object\n"
+        "         'Table' cannot be the reserved string 'Measures'\"). For a\n"
+        "         dedicated measures-holding table use '_Measures' or\n"
+        "         'Key Measures' instead.\n"
         "       - For wide sources: a second table block with an unpivot\n"
         "         partition (M: Table.UnpivotOtherColumns) producing long form\n"
         "       - Measure definitions with DAX expressions and formatStrings\n"
         "         (e.g. measure 'Total Revenue' = SUM(sales[Revenue]))\n"
         "       - A partition block pointing at the CSV/Excel file path\n"
-        "     Do NOT call the Power BI MCP. Write the TMDL as inline text.\n"
+        "     Do NOT call the Power BI MCP, and do NOT write the .tmdl file(s)\n"
+        "     yourself with a file-editing tool — hand-written TMDL routinely\n"
+        "     gets indentation wrong (TMDL requires literal TAB characters; a\n"
+        "     measure or column not nested one tab under its table fails to\n"
+        "     open in Power BI Desktop with a cryptic 'Invalid indentation'\n"
+        "     error). Keep the TMDL as an in-memory string and pass it to\n"
+        "     SimBI.write_semantic_model in step 5 instead.\n"
         "  4. Call SimBI.lint_measures with the TMDL. Fix every ERROR; review\n"
         "     each WARNING and either fix it or confirm it is a deliberate\n"
         "     choice. A clean lint does NOT prove the DAX is correct — it\n"
         "     proves the known footguns are absent.\n"
-        "  5. Call SimBI.parse_schema with the TMDL text you wrote in step 3.\n"
-        "  6. Generate annotated HTML using the schema (see VOCABULARY below).\n"
+        "  5. Call SimBI.write_semantic_model with the TMDL text and pbip_path\n"
+        "     to persist it — repairs indentation/reserved-name mistakes and\n"
+        "     rejects load-blocking errors BEFORE anything reaches disk,\n"
+        "     instead of failing later in Power BI Desktop.\n"
+        "  6. Call SimBI.parse_schema with the same TMDL text you wrote in step 3.\n"
+        "  7. Call SimBI.get_vocabulary, then generate annotated HTML using the schema.\n"
         "     Every visual element MUST have non-zero CSS dimensions — use the\n"
         "     dashboard.css classes (db-page, db-grid, db-card, db-chart-area).\n"
-        "  7. Call SimBI.validate_mockup_html to lint the HTML.\n"
-        "  8. Call SimBI.emit_report with pbip_path pointing to the .pbip.\n"
-        "     emit_report automatically writes the measures from step 3 into the\n"
-        "     SemanticModel so they appear in Power BI Desktop on open.\n"
-        "  9. Open the .pbip fresh in Power BI Desktop. Visuals render immediately\n"
+        "  8. Call SimBI.validate_mockup_html to lint the HTML.\n"
+        "  9. Call SimBI.emit_report with pbip_path pointing to the .pbip.\n"
+        "     emit_report writes any measures still missing from the\n"
+        "     SemanticModel (idempotent — step 5 already wrote most of it).\n"
+        "     Do NOT skip step 5 and jump here directly: any table with no\n"
+        "     .tmdl yet gets silently created with NO data connection. If you\n"
+        "     see that warning in emit_report's own return value, go back and\n"
+        "     call write_semantic_model with the full TMDL (including the\n"
+        "     partition), then call emit_report again.\n"
+        " 10. Open the .pbip fresh in Power BI Desktop. Visuals render immediately\n"
         "     but show empty data — use Home → Transform data to connect the CSV.\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         "PATH 2 — Microsoft Power BI MCP + SimBI\n"
@@ -86,6 +113,9 @@ mcp: FastMCP = FastMCP(
         "  1. Open the .pbip in Power BI Desktop (leave it open).\n"
         "  2. Use the Power BI MCP to build the semantic model (create tables,\n"
         "     measures, relationships, calculated tables, refresh data, etc.).\n"
+        "     NAMING: never create a table named 'Measures' — it is reserved and\n"
+        "     Power BI refuses to open the resulting .pbip. For a disconnected\n"
+        "     measures-holding table use '_Measures' or 'Key Measures'.\n"
         "  3. SYNC TO DISK — call Power BI MCP database_operations\n"
         "     ExportToTmdlFolder, tmdlFolderPath = <Name>.SemanticModel/definition.\n"
         "     Without this step all model changes are lost on next open.\n"
@@ -93,7 +123,7 @@ mcp: FastMCP = FastMCP(
         "     Power BI Desktop caches the Report in memory — SimBI's writes to\n"
         "     .Report/ are silently ignored until a fresh cold open.\n"
         "  5. Call SimBI.parse_schema with the SemanticModel/definition folder path.\n"
-        "  6. Generate annotated HTML using the schema (see VOCABULARY below).\n"
+        "  6. Call SimBI.get_vocabulary, then generate annotated HTML using the schema.\n"
         "     Every visual element MUST have non-zero CSS dimensions — use the\n"
         "     dashboard.css classes (db-page, db-grid, db-card, db-chart-area).\n"
         "  7. Call SimBI.validate_mockup_html to lint the HTML.\n"
@@ -110,11 +140,13 @@ mcp: FastMCP = FastMCP(
         "to create measures. Switch to PATH 1 immediately.\n\n"
         "SimBI does NOT need a live Power BI connection to create measures,\n"
         "tables, or relationships. Everything is file-based:\n"
-        "  - Write the full TMDL (tables + measure blocks + partitions) as inline\n"
-        "    text and pass it to SimBI.parse_schema.\n"
-        "  - SimBI.emit_report then writes those measures into the .SemanticModel\n"
-        "    on disk via patch_semantic_model_measures — no XMLA, no live session.\n"
-        "  - The user opens the .pbip fresh and the measures are already there.\n\n"
+        "  - Write the full TMDL (tables + measure blocks + partitions) as an\n"
+        "    in-memory string — do not write .tmdl files yourself.\n"
+        "  - Call SimBI.write_semantic_model with that TMDL and pbip_path to\n"
+        "    persist it — normalizes reserved names, repairs indentation and\n"
+        "    partition mistakes. No XMLA, no live session.\n"
+        "  - Then SimBI.parse_schema (same text) and SimBI.emit_report as usual.\n"
+        "  - The user opens the .pbip fresh and the tables/measures are already there.\n\n"
         "Reach for Power BI MCP only when you have already confirmed a live\n"
         "connection exists. The presence of the tool in the catalog is NOT proof\n"
         "of a connection.\n\n"
@@ -140,12 +172,12 @@ mcp: FastMCP = FastMCP(
         "      who cannot find the controls assume there are none.\n"
         "    - Default state: 'Select all'. Do NOT pre-filter unless the\n"
         "      dashboard title explicitly states the scope.\n"
-        "    - SLICER STYLE — REQUIRED on every slicer, no exceptions:\n"
+        "    - SLICER STYLE — set data-pbi-style explicitly on every slicer:\n"
         "        data-pbi-style='dropdown'  text/category fields (default)\n"
         "        data-pbi-style='list'      short enum fields (≤10 items shown)\n"
         "        data-pbi-style='between'   numeric or date range fields (e.g. Year)\n"
-        "      A slicer without this attribute WILL render as an unusable\n"
-        "      tile/button layout in Power BI Desktop. There is no default.\n\n"
+        "      When omitted SimBI defaults to 'dropdown', which is only right\n"
+        "      for text/category fields — set it explicitly.\n\n"
         "  CHART CHOICE\n"
         "    - 'Comparison across categories' → bar/column chart.\n"
         "    - 'Trend over time' → line chart (or area for cumulative).\n"
@@ -158,7 +190,8 @@ mcp: FastMCP = FastMCP(
         "  COLOUR\n"
         "    - SimBI ships a theme: Microsoft CY25SU10 palette + opinionated\n"
         "      visualStyles (gridlines off, no visual borders, lean cards).\n"
-        "      You generally do NOT need to specify colours.\n"
+        "      You generally do NOT need to specify colours. Before writing a\n"
+        "      custom theme_path file for emit_report, call SimBI.get_theme_schema.\n"
         "    - Semantic colour is RESERVED: green = good, red = bad,\n"
         "      grey = neutral/inactive. Never reassign these to categorical\n"
         "      data (a red bar for APAC makes APAC look like an alert).\n"
@@ -190,9 +223,9 @@ mcp: FastMCP = FastMCP(
         "      backgrounds, per-visual branding). Every non-data pixel\n"
         "      spends the reader's finite attention. Brand belongs in the\n"
         "      theme and page header, not on every visual.\n\n"
-        + ANNOTATION_SPEC_TEXT
-        + "\n"
-        + CSS_CLASS_CATALOG
+        + "VOCABULARY: call the get_vocabulary tool for the full data-pbi\n"
+          "annotation vocabulary, universal attributes, styling contract, and\n"
+          "CSS class catalog before writing any mockup HTML.\n"
     ),
 )
 
@@ -229,6 +262,21 @@ def _resolve_pbip(pbip_path: str) -> Path:
     )
 
 
+def _format_emit_result(result: EmitResult, validator_warnings: list[str]) -> str:
+    lines = [f".Report written: {result.report_dir}"]
+    if result.previews:
+        lines.append("Preview (HTML mockup render, NOT a Power BI render):")
+        lines.extend(f"  {p}" for p in result.previews)
+    if result.styling_notes:
+        lines.append("Styling transferred:")
+        lines.extend(f"  {n}" for n in result.styling_notes)
+    all_warnings = list(validator_warnings) + list(result.warnings)
+    if all_warnings:
+        lines.append("Warnings:")
+        lines.extend(f"  - {w}" for w in all_warnings)
+    return "\n".join(lines)
+
+
 @mcp.resource("simbi://annotation-vocabulary")
 def annotation_vocabulary() -> str:
     """HTML annotation vocabulary and CSS class catalog for dashboard mockups."""
@@ -236,24 +284,38 @@ def annotation_vocabulary() -> str:
 
 
 @mcp.tool()
+def analyze_data_source(path: str, sheet: str | None = None) -> str:
+    """Profile a CSV/Excel file's structure before authoring TMDL.
+
+    Call this before writing table/column TMDL for a data source you haven't
+    inspected yet — do NOT ask the user to describe columns, and do NOT try
+    to open the file with a generic file-reading tool (binary .xlsx fails).
+
+    Args:
+      path: path to a .csv or .xlsx file.
+      sheet: for multi-sheet .xlsx, optionally restrict to one sheet name.
+        Omit to profile every sheet in the workbook.
+
+    Returns a JSON report: one entry per table (sheet, or the CSV itself),
+    each with row count and per-column name/TMDL type/null stats/distinct
+    count/sample values/hints (likely primary key, date/time-intelligence
+    candidate, dimension vs. high-cardinality). A table-level hint flags
+    WIDE format (e.g. columns 2023/2024/2025) needing an unpivot.
+    """
+    return profile_file(path, sheet).model_dump_json()
+
+
+@mcp.tool()
 def parse_schema(tmdl: str) -> str:
-    """Convert TMDL to schema JSON.
+    """Convert TMDL to schema JSON (pass the result to emit_report).
 
-    `tmdl` accepts either:
-      - inline TMDL text that YOU write (the contents of a single table .tmdl, or
-        concatenated files). This is the supported way to define tables, columns,
-        partitions, AND measures WITHOUT a live Power BI MCP connection — include
-        `measure` blocks directly in the TMDL text and emit_report will write them
-        into the .SemanticModel on disk. You do NOT need Power BI MCP to create
-        measures; SimBI handles the persistence itself.
-      - a path to ANY folder containing .tmdl files. All .tmdl files in the folder
-        (recursively) are concatenated in sorted order before parsing. Typical sources:
-          * a folder produced by Power BI MCP's ExportTMDL / ExportToTmdlFolder, OR
-          * the live `<Name>.SemanticModel/definition` folder of a .pbip project
-            (Power BI Desktop's TMDL layout, with a `tables/` subdirectory) — preferred,
-            since it stays in sync after a Power BI MCP ExportToTmdlFolder back into it.
+    `tmdl` accepts either inline TMDL text you write (tables, columns,
+    partitions AND measure blocks — no live Power BI connection needed;
+    emit_report persists the measures into the .SemanticModel), or a path to
+    any folder containing .tmdl files (e.g. <Name>.SemanticModel/definition);
+    all .tmdl files under it are concatenated in sorted order before parsing.
 
-    Returns a JSON-serialised ModelSchema that can be passed to emit_report.
+    Returns a JSON-serialised ModelSchema.
     """
     tmdl_text = tmdl
     if len(tmdl) < 1024 and "\n" not in tmdl:
@@ -267,46 +329,57 @@ def parse_schema(tmdl: str) -> str:
             )
             if not tmdl_text.strip():
                 raise ValueError(f"No .tmdl files found in {candidate}")
-    schema = parse_tmdl_schema(tmdl_text)
+    schema = sanitize_schema(parse_tmdl_schema(tmdl_text))
     return schema.model_dump_json()
+
+
+@mcp.tool()
+def write_semantic_model(tmdl: str, pbip_path: str) -> str:
+    """Persist agent-authored table/relationship TMDL into the .SemanticModel, normalized.
+
+    Call this to save TMDL you drafted — do NOT write .tmdl files yourself with
+    a file-editing tool. Hand-written TMDL routinely gets indentation wrong
+    (TMDL requires literal TAB characters; a measure/column not nested one tab
+    under its table, or indented with spaces, fails to open in Power BI
+    Desktop with a cryptic "Invalid indentation" error). This repairs that,
+    renames reserved table names (e.g. "Measures") everywhere referenced,
+    repairs known partition corruptions, and refuses to write anything if a
+    load-blocking DAX/lineage/GUID error is found.
+
+    Args:
+      tmdl: full model TMDL — one or more `table <name>` blocks (columns,
+        partition, measures) and optional `relationship <guid>` blocks.
+      pbip_path: EXISTING .pbip file, or a folder containing exactly one.
+
+    Returns a short report: tables written, plus reserved-name renames.
+    Raises ValueError (nothing written) on errors — fix the TMDL and retry.
+    """
+    pbip = _resolve_pbip(pbip_path)
+    semantic_model_dir = pbip.parent / f"{pbip.stem}.SemanticModel"
+    renames = _write_semantic_model(semantic_model_dir, tmdl)
+    msg = f"Semantic model written to {semantic_model_dir}"
+    if renames:
+        msg += "\nReserved-name renames applied: " + ", ".join(
+            f"{old} -> {new}" for old, new in renames.items()
+        )
+    return msg
 
 
 @mcp.tool()
 def lint_measures(tmdl: str) -> str:
     """Advisory lint of DAX measures in TMDL text. NOT a correctness check.
 
-    Call this AFTER drafting your TMDL and BEFORE parse_schema, to catch a
-    small set of mechanical mistakes that produce confusing runtime errors:
+    Call AFTER drafting TMDL, BEFORE parse_schema. Rules:
+      ERROR   reference to a table/column that does not exist in the TMDL
+      ERROR   relationship GUID not a valid random UUID (crashes PBI Desktop)
+      ERROR   lineageTag not a full UUID (silently misread)
+      ERROR   calculated-table column missing sourceColumn (load failure)
+      WARNING SEARCH() without 4th arg (runtime error on no-match)
+      WARNING aggregation over a 4-digit-year column (unpivot the wide source)
 
-      ERROR    Reference to a table or column that does not exist in the TMDL.
-               Almost always a typo or stale ref. Must be fixed.
-      ERROR    Relationship GUID is not a valid random UUID. Sequential or
-               hand-crafted GUIDs (e.g. a1b2c3d4-e5f6-7890-abcd-ef1234567890)
-               cause Power BI Desktop to crash with "invalid column ID" on open.
-               Generate a real random UUID for every relationship identifier.
-      ERROR    lineageTag is not a full UUID. Truncated hex tags (20 chars) are
-               silently misread by the TMDL parser. All lineageTag values must be
-               xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx format.
-      ERROR    Calculated table column missing sourceColumn property. Power BI
-               Desktop requires sourceColumn even on calculated tables — it maps
-               to the DAX output column name. Omitting it causes a load failure.
-      WARNING  SEARCH() called without a 4th argument. SEARCH raises a runtime
-               error when the substring is not found; pass a 4th arg (e.g.
-               SEARCH(find, within, 1, BLANK())) or use CONTAINSSTRING.
-      WARNING  Aggregation (SUM/AVERAGE/MIN/MAX/etc.) applied to a column whose
-               name is a 4-digit year (e.g. SUM(t[2026])). Strong signal of a
-               wide-format source that should be unpivoted to Year/Value first.
-
-    Returns:
-      "OK — no lint findings" when nothing triggered, OR a multi-line report
-      with one finding per line. Findings have the form:
-        [SEVERITY] <measure name> (<rule>): <message>
-      A clean report does NOT mean the DAX is semantically correct — it means
-      these specific footguns are absent. Semantic correctness still requires
-      thought.
-
-    This tool is advisory and non-exhaustive. The rule set is deliberately
-    narrow to keep precision high; many real bugs are out of scope.
+    Returns "OK — no lint findings" or one finding per line:
+    [SEVERITY] <measure> (<rule>): <message>. A clean report does NOT prove
+    the DAX is semantically correct — only that these footguns are absent.
     """
     findings = _lint_measures(tmdl)
     if not findings:
@@ -331,12 +404,42 @@ def validate_mockup_html(html: str, schema_json: str) -> str:
       On failure: raises ValueError with the exact offending attribute and a
       correct-shape example. Fix the HTML and call this tool again.
     """
-    schema = ModelSchema.model_validate_json(schema_json)
+    schema = sanitize_schema(ModelSchema.model_validate_json(schema_json))
     try:
-        validate_mockup(html, schema)
+        warnings = validate_mockup(html, schema)
     except ValidationError as exc:
         raise ValueError(str(exc)) from exc
-    return f"OK — {count_annotated_visuals(html)} visuals validated"
+    msg = f"OK — {count_annotated_visuals(html)} visuals validated"
+    if warnings:
+        msg += "\n\nWarnings:\n" + "\n".join(f"  - {w}" for w in warnings)
+    return msg
+
+
+@mcp.tool()
+def get_vocabulary() -> str:
+    """Full data-pbi annotation vocabulary: call BEFORE writing mockup HTML.
+
+    Returns every visual type (~30) with its required AND optional attributes,
+    the universal attributes (data-pbi-id, data-pbi-hidden), correct-shape
+    examples, the STYLING CONTRACT (which CSS transfers to Power BI: computed
+    background-color, border, border-radius, box-shadow; shapes map these to
+    fill/outline), and the CSS class catalog for mockup layout.
+    """
+    return ANNOTATION_SPEC_TEXT + "\n" + CSS_CLASS_CATALOG
+
+
+@mcp.tool()
+def get_theme_schema() -> str:
+    """Report-wide theme JSON schema — call before writing a custom theme_path file.
+
+    Returns SimBI's three-tier theme resolution order (Microsoft CY25SU10 →
+    SimBI opinionated visualStyles → your optional theme_path, deep-merged),
+    the actual default dataColors/textClasses/visualStyles SimBI already sets,
+    and how this report-wide theme relates to the per-visual WYSIWYG styling
+    contract from get_vocabulary (explicit data-pbi-fill/data-pbi-stroke or an
+    element's own CSS override the theme for that one visual only).
+    """
+    return build_theme_schema_text()
 
 
 @mcp.tool()
@@ -346,106 +449,34 @@ async def emit_report(
     pbip_path: str,
     theme_path: str | None = None,
 ) -> str:
-    """Render annotated HTML and write the .Report folder beside an existing .pbip.
+    """Render annotated HTML in headless Chrome; write the .Report folder beside an existing .pbip.
+
+    Workflow: write_semantic_model (new tables/measures) → get_vocabulary →
+    write HTML → validate_mockup_html (after every edit) → this tool.
 
     Args:
-      html: HTML mockup where every visual element carries a `data-pbi` attribute
-            plus the required field bindings (see VOCABULARY below).
-      schema_json: the JSON string returned by parse_schema.
-      pbip_path: EITHER the absolute path to an EXISTING .pbip file, OR the
-            absolute path to a folder that already contains one. When given
-            a folder, SimBI auto-discovers the single .pbip inside (if there
-            are zero or multiple .pbip files in the folder, you get a clear
-            error and must pass the file path explicitly). The .pbip and its
-            sibling .SemanticModel — created earlier by Power BI Desktop or
-            the Power BI MCP — are left untouched.
-      theme_path: OPTIONAL absolute path to a partial PBIR theme JSON file
-            (corp branding, custom palette, textClasses overrides, etc.).
-            When omitted, SimBI emits its opinionated default theme:
-            Microsoft CY25SU10 colour science + SimBI visualStyles enforcing
-            the design playbook (hidden gridlines, lean cards, no visual
-            borders, consistent Segoe UI typography). User themes deep-merge
-            ONTO that default — pass only `dataColors` to rebrand without
-            losing SimBI's visualStyles opinions.
+      html: annotated HTML. ALL pages in ONE call — wrap each page in
+        <div data-pbi-page="Name">; calling once per page replaces prior pages.
+      schema_json: JSON string from parse_schema.
+      pbip_path: EXISTING .pbip file, or a folder with exactly one.
+        SimBI never creates .pbip projects.
+      theme_path: optional partial PBIR theme JSON; deep-merges onto SimBI's
+        default (pass dataColors to rebrand).
 
-    Returns: absolute path to the .Report folder that was written.
+    PREREQUISITE: Power BI Desktop MUST be CLOSED (ignores .Report writes
+    while open). A schema table with no .tmdl yet is created here with NO
+    data connection (warned in the return) — call write_semantic_model first.
 
-    PREREQUISITE — Power BI Desktop MUST be closed before calling this tool:
-      Power BI Desktop caches the Report in memory while the file is open.
-      Any files SimBI writes to the .Report folder while the file is open will
-      be silently ignored when the user reloads — visuals will appear missing.
-
-      Two supported sequences (pick based on whether you have a live Power BI
-      MCP connection — NOT just whether the tool is listed in the catalog):
-
-      Path 1 (no live connection — fully offline, file-based):
-        (1) Write TMDL inline (tables + measure blocks + partitions),
-        (2) parse_schema(tmdl), (3) ensure Power BI Desktop is CLOSED,
-        (4) call this tool — measures are written into .SemanticModel
-        automatically via patch_semantic_model_measures,
-        (5) open the .pbip fresh.
-
-      Path 2 (live Power BI MCP connection already established):
-        (1) Use Power BI MCP to build the model in the live session,
-        (2) ExportToTmdlFolder → SemanticModel/definition,
-        (3) CLOSE Power BI Desktop, (4) parse_schema(<definition folder>),
-        (5) call this tool, (6) open the .pbip fresh.
-
-      If a Power BI MCP call fails with a not-connected error, do not retry —
-      use Path 1 instead. SimBI does not require the live connection.
-
-    PREREQUISITE — the .pbip MUST already exist before calling this tool:
-      Power BI Desktop or the Power BI MCP creates the .pbip and its
-      .SemanticModel (which holds the live data model). SimBI ONLY contributes
-      the .Report/ folder. If no .pbip exists at pbip_path, this tool raises
-      ValueError telling you to create it first — do not invent a new path.
-
-    HTML SIZING — every visual element MUST have non-zero CSS dimensions:
-      SimBI renders the HTML in headless Chrome to extract bounding boxes.
-      A visual element with zero width/height produces an error. Use the
-      dashboard.css classes (db-page, db-grid, db-card, db-chart-area, etc.)
-      to ensure every element has a real computed size.
-
-    VOCABULARY — every visual MUST be a single element tagged like this:
-
-      <div data-pbi="card"        data-pbi-measure="Total Revenue">...</div>
-      <div data-pbi="columnChart" data-pbi-axis="sales[Region]"
-                                  data-pbi-values="Total Revenue">...</div>
-      <div data-pbi="barChart"    data-pbi-axis="sales[Region]"
-                                  data-pbi-values="Total Revenue">...</div>
-      <div data-pbi="lineChart"   data-pbi-axis="sales[OrderDate]"
-                                  data-pbi-values="Total Revenue"
-                                  data-pbi-series="sales[Category]">...</div>
-      <div data-pbi="slicer"      data-pbi-field="sales[Region]"   data-pbi-style="dropdown">...</div>
-      <div data-pbi="slicer"      data-pbi-field="sales[Year]"     data-pbi-style="between">...</div>
-      <div data-pbi="table"       data-pbi-columns="sales[Region],Total Revenue,Order Count">...</div>
-
-    HARD RULES (these are the ONLY accepted shapes — anything else is rejected):
-      - data-pbi-measure and data-pbi-values hold bare MEASURE names from the
-        schema (e.g. "Total Revenue"). Never Table[Column].
-      - data-pbi-axis, data-pbi-field, data-pbi-series hold Table[Column] refs
-        (e.g. "sales[Region]"). Never a bare measure name.
-      - Every slicer MUST have data-pbi-style="dropdown", "list", or "between".
-        Omitting it is a hard error — Power BI will render an unusable button tile.
-      - data-pbi-columns (table visual) is comma-separated; each token is EITHER
-        a bare measure name OR a Table[Column] ref. Column tokens become row
-        groupings; measure tokens become aggregated value columns.
-      - The value of data-pbi MUST be one of: card, columnChart, barChart,
-        lineChart, slicer, table. Anything else is rejected.
-      - Use absolute pixel positions (left/top/width/height) on each visual
-        so the renderer can capture geometry. CSS grid/flex is fine for layout
-        but each visual element needs computable bounding box.
-
-    On any annotation problem, this tool raises ValueError with the exact
-    element that failed and a corrected example — fix the HTML and call again.
+    Returns a multi-line report: .Report path, then preview PNGs (HTML
+    render, not Power BI), transferred styling, and warnings.
     """
     pbip = _resolve_pbip(pbip_path)
-    schema = ModelSchema.model_validate_json(schema_json)
+    schema = sanitize_schema(ModelSchema.model_validate_json(schema_json))
     try:
-        validate_mockup(html, schema)
+        validator_warnings = validate_mockup(html, schema)
     except ValidationError as exc:
         raise ValueError(str(exc)) from exc
-    report_dir = await emit_pbir(
+    result = await emit_pbir(
         html=html,
         schema=schema,
         report_name=pbip.stem,
@@ -458,9 +489,15 @@ async def emit_report(
     # This check reads the TMDL and skips silently when measures are already
     # present, so Path 2 (measures written by the MS Power BI MCP) is untouched.
     semantic_model_dir = pbip.parent / f"{pbip.stem}.SemanticModel"
+    patch_warnings: list[str] = []
     if semantic_model_dir.exists():
-        patch_semantic_model_measures(schema, semantic_model_dir)
-    return str(report_dir)
+        # Rename any reserved-named table the upstream authoring tool (Power BI
+        # MCP / Desktop) wrote — e.g. "Measures" — BEFORE patching measures, so
+        # the patcher sees the renamed file (measures already present) and the
+        # model matches the report SimBI emitted from the sanitized schema.
+        sanitize_semantic_model_dir(semantic_model_dir)
+        patch_warnings = patch_semantic_model_measures(schema, semantic_model_dir)
+    return _format_emit_result(result, validator_warnings + patch_warnings)
 
 
 def main() -> None:

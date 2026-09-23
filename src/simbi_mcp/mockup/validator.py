@@ -6,130 +6,76 @@ that does not exist in the schema — catching hallucinations before Phase 3.
 """
 from __future__ import annotations
 
+import difflib
 import re
 from html.parser import HTMLParser
 
-from simbi_mcp.mockup.annotations import COLUMN_REF_ATTRS, MEASURE_ATTRS, VISUAL_ATTRS, VisualType
+from simbi_mcp.mockup.annotations import (
+    COLUMN_REF_ATTRS,
+    EXAMPLES,
+    MEASURE_ATTRS,
+    UNIVERSAL_ATTRS,
+    VISUAL_ATTRS,
+    VisualType,
+)
 from simbi_mcp.types import ModelSchema
 
 _COL_REF_RE = re.compile(r"^(.+)\[(.+)\]$")
-
-# Concrete correct-shape example per visual type — appended to every error
-# so the LLM client gets an actionable template, not just a complaint.
-_EXAMPLES: dict[VisualType, str] = {
-    VisualType.CARD: '<div data-pbi="card" data-pbi-measure="Total Revenue"></div>',
-    VisualType.COLUMN_CHART: (
-        '<div data-pbi="columnChart" data-pbi-axis="sales[Region]" '
-        'data-pbi-values="Total Revenue"></div>'
-    ),
-    VisualType.BAR_CHART: (
-        '<div data-pbi="barChart" data-pbi-axis="sales[Region]" '
-        'data-pbi-values="Total Revenue"></div>'
-    ),
-    VisualType.LINE_CHART: (
-        '<div data-pbi="lineChart" data-pbi-axis="sales[OrderDate]" '
-        'data-pbi-values="Total Revenue"></div>'
-    ),
-    VisualType.SLICER: '<div data-pbi="slicer" data-pbi-field="sales[Region]"></div>',
-    VisualType.TABLE: (
-        '<div data-pbi="table" '
-        'data-pbi-columns="sales[Region],Total Revenue,Order Count"></div>'
-    ),
-    VisualType.CLUSTERED_COLUMN_CHART: (
-        '<div data-pbi="clusteredColumnChart" data-pbi-axis="sales[Region]" '
-        'data-pbi-values="Total Revenue" data-pbi-series="sales[OrderDate]"></div>'
-    ),
-    VisualType.CLUSTERED_BAR_CHART: (
-        '<div data-pbi="clusteredBarChart" data-pbi-axis="sales[Region]" '
-        'data-pbi-values="Total Revenue" data-pbi-series="sales[OrderDate]"></div>'
-    ),
-    VisualType.HUNDRED_PERCENT_STACKED_BAR_CHART: (
-        '<div data-pbi="hundredPercentStackedBarChart" data-pbi-axis="sales[Region]" '
-        'data-pbi-values="Total Revenue" data-pbi-series="sales[OrderDate]"></div>'
-    ),
-    VisualType.HUNDRED_PERCENT_STACKED_COLUMN_CHART: (
-        '<div data-pbi="hundredPercentStackedColumnChart" data-pbi-axis="sales[Region]" '
-        'data-pbi-values="Total Revenue" data-pbi-series="sales[OrderDate]"></div>'
-    ),
-    VisualType.AREA_CHART: (
-        '<div data-pbi="areaChart" data-pbi-axis="sales[OrderDate]" '
-        'data-pbi-values="Total Revenue"></div>'
-    ),
-    VisualType.PIE_CHART: (
-        '<div data-pbi="pieChart" data-pbi-axis="sales[Region]" '
-        'data-pbi-values="Total Revenue"></div>'
-    ),
-    VisualType.DONUT_CHART: (
-        '<div data-pbi="donutChart" data-pbi-axis="sales[Region]" '
-        'data-pbi-values="Total Revenue"></div>'
-    ),
-    VisualType.MULTI_ROW_CARD: (
-        '<div data-pbi="multiRowCard" '
-        'data-pbi-measures="Total Revenue,Order Count"></div>'
-    ),
-    VisualType.KPI: (
-        '<div data-pbi="kpi" data-pbi-measure="Total Revenue" '
-        'data-pbi-target="Revenue Target" data-pbi-trend="sales[OrderDate]"></div>'
-    ),
-    VisualType.GAUGE: (
-        '<div data-pbi="gauge" data-pbi-measure="Total Revenue" '
-        'data-pbi-target="Revenue Target"></div>'
-    ),
-    VisualType.DOT_PLOT: (
-        '<div data-pbi="dotPlot" data-pbi-axis="sales[Region]" '
-        'data-pbi-values="Total Revenue"></div>'
-    ),
-    VisualType.COMBO_CHART: (
-        '<div data-pbi="comboChart" data-pbi-axis="sales[OrderDate]" '
-        'data-pbi-column-values="Total Revenue" data-pbi-line-values="Gross Margin"></div>'
-    ),
-    VisualType.TREEMAP: (
-        '<div data-pbi="treemap" data-pbi-group="sales[Region]" '
-        'data-pbi-values="Total Revenue"></div>'
-    ),
-    VisualType.FUNNEL_CHART: (
-        '<div data-pbi="funnelChart" data-pbi-axis="sales[Stage]" '
-        'data-pbi-values="Lead Count"></div>'
-    ),
-    VisualType.HISTOGRAM: (
-        '<div data-pbi="histogram" data-pbi-values="Order Value" data-pbi-bins="20"></div>'
-    ),
-    VisualType.SCATTER_CHART: (
-        '<div data-pbi="scatterChart" data-pbi-x="Ad Spend" '
-        'data-pbi-y="Total Revenue" data-pbi-details="sales[Market]"></div>'
-    ),
-    VisualType.BUBBLE_CHART: (
-        '<div data-pbi="bubbleChart" data-pbi-x="Ad Spend" '
-        'data-pbi-y="Total Revenue" data-pbi-size="Order Count" '
-        'data-pbi-details="sales[Market]"></div>'
-    ),
-    VisualType.WATERFALL_CHART: (
-        '<div data-pbi="waterfallChart" data-pbi-axis="sales[Driver]" '
-        'data-pbi-values="Variance"></div>'
-    ),
-    VisualType.RIBBON_CHART: (
-        '<div data-pbi="ribbonChart" data-pbi-axis="sales[OrderDate]" '
-        'data-pbi-values="Total Revenue" data-pbi-series="sales[Category]"></div>'
-    ),
-    VisualType.MAP: (
-        '<div data-pbi="map" data-pbi-location="sales[City]" '
-        'data-pbi-size="Total Revenue"></div>'
-    ),
-    VisualType.FILLED_MAP: (
-        '<div data-pbi="filledMap" data-pbi-location="sales[Country]" '
-        'data-pbi-color-saturation="Total Revenue"></div>'
-    ),
-    VisualType.SHAPE_MAP: (
-        '<div data-pbi="shapeMap" data-pbi-location="sales[Territory]" '
-        'data-pbi-color-saturation="Total Revenue"></div>'
-    ),
-}
+_TIME_TOKENS: frozenset[str] = frozenset(
+    {"year", "date", "month", "quarter", "period", "week", "day", "time"}
+)
+_HBAR_TYPES: frozenset[VisualType] = frozenset({
+    VisualType.BAR_CHART,
+    VisualType.CLUSTERED_BAR_CHART,
+    VisualType.HUNDRED_PERCENT_STACKED_BAR_CHART,
+})
+_NAME_TOKEN_RE = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])|\d+")
+_UNSUPPORTED_INLINE_PROPS: frozenset[str] = frozenset({
+    "color", "font-family", "font-size", "font-weight", "font-style",
+    "opacity", "text-align", "background-image",
+})
 
 
 def _example_for(vtype: VisualType | None) -> str:
     if vtype is None:
-        return "\n".join(_EXAMPLES.values())
-    return _EXAMPLES[vtype]
+        return "\n".join(EXAMPLES.values())
+    return EXAMPLES[vtype]
+
+
+def _check_unknown_attrs(attrs: dict[str, str], vtype: VisualType, raw_type: str) -> None:
+    spec = VISUAL_ATTRS[vtype]
+    allowed = (
+        {"data-pbi", "data-pbi-page"}
+        | set(UNIVERSAL_ATTRS)
+        | set(spec["required"])
+        | set(spec["optional"])
+    )
+    for attr in attrs:
+        if not attr.startswith("data-pbi") or attr in allowed:
+            continue
+        suggestion = difflib.get_close_matches(attr, sorted(allowed - {"data-pbi", "data-pbi-page"}), n=1)
+        hint = f" Did you mean {suggestion[0]!r}?" if suggestion else ""
+        raise ValidationError(
+            f"Unknown attribute {attr!r} on data-pbi={raw_type!r}.{hint}\n"
+            f"Valid attributes for {raw_type}: "
+            f"{sorted(allowed - {'data-pbi', 'data-pbi-page'})}\n"
+            f"Correct shape:\n{_example_for(vtype)}"
+        )
+
+
+def _table_of_column_ref(ref: str) -> str | None:
+    m = _COL_REF_RE.match(ref)
+    return m.group(1) if m else None
+
+
+def _tables_related(schema: ModelSchema, a: str, b: str) -> bool:
+    if a == b:
+        return True
+    # Direct relationship only (multi-hop paths are out of scope).
+    for r in schema.relationships:
+        if {r.from_table, r.to_table} == {a, b}:
+            return True
+    return False
 
 
 class ValidationError(Exception):
@@ -142,9 +88,14 @@ class _AnnotationCollector(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
         self.nodes: list[dict[str, str]] = []
+        self.pages: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attr_dict = {k: v or "" for k, v in attrs}
+        if "data-pbi-page" in attr_dict and "data-pbi" not in attr_dict:
+            pname = attr_dict["data-pbi-page"].strip()
+            if pname:
+                self.pages.append(pname)
         if "data-pbi" in attr_dict:
             self.nodes.append(attr_dict)
 
@@ -156,12 +107,15 @@ def count_annotated_visuals(html: str) -> int:
     return len(collector.nodes)
 
 
-def validate_mockup(html: str, schema: ModelSchema) -> None:
+def validate_mockup(html: str, schema: ModelSchema) -> list[str]:
     """Parse html and validate every data-pbi element against schema.
 
-    Raises ValidationError on the first problem found. Stops at the first
+    Raises ValidationError on the first fatal problem found. Stops at the first
     failure — callers that need all errors should call validate_mockup inside
     a loop with corrected HTML between iterations.
+
+    Returns a list of non-fatal warnings (empty when clean) — e.g. cross-table
+    axis/series that still renders because a relationship exists but is fragile.
     """
     collector = _AnnotationCollector()
     collector.feed(html)
@@ -174,11 +128,65 @@ def validate_mockup(html: str, schema: ModelSchema) -> None:
             f"{_example_for(None)}"
         )
 
+    all_warnings: list[str] = []
     for node in collector.nodes:
-        _validate_node(node, schema)
+        all_warnings.extend(_validate_node(node, schema))
+
+    # Cross-visual checks: duplicate ids, bookmark/button references
+    _check_cross_references(collector.nodes, pages=collector.pages)
+
+    return all_warnings
 
 
-def _validate_node(attrs: dict[str, str], schema: ModelSchema) -> None:
+def _bar_time_axis_warning(
+    vtype: VisualType, attrs: dict[str, str], schema: ModelSchema
+) -> str | None:
+    if vtype not in _HBAR_TYPES:
+        return None
+    ref = attrs.get("data-pbi-axis", "")
+    m = _COL_REF_RE.match(ref)
+    if not m:
+        return None
+    table_name, col_name = m.group(1), m.group(2)
+    table = next((t for t in schema.tables if t.name == table_name), None)
+    col = next((c for c in table.columns if c.name == col_name), None) if table else None
+    is_datetime = col is not None and col.data_type.lower() == "datetime"
+    tokens = {t.lower() for t in _NAME_TOKEN_RE.findall(col_name)}
+    if is_datetime or tokens & _TIME_TOKENS:
+        return (
+            f"Visual data-pbi={vtype.value!r}: {vtype.value} draws HORIZONTAL bars, and "
+            f"axis column {ref!r} looks like a time dimension. Time on the axis usually "
+            f"wants columnChart (vertical) or lineChart. Keep {vtype.value} only if "
+            f"horizontal category rows are intended."
+        )
+    return None
+
+
+def _inline_style_warnings(attrs: dict[str, str]) -> list[str]:
+    """Warn about inline CSS that will NOT transfer to Power BI. Only inline
+    styles are checked — computed styles always resolve to a value, so checking
+    them would flag every element."""
+    out: list[str] = []
+    label = attrs.get("data-pbi", "?")
+    for decl in attrs.get("style", "").split(";"):
+        prop, sep, value = decl.partition(":")
+        if not sep:
+            continue
+        prop = prop.strip().lower()
+        if prop in _UNSUPPORTED_INLINE_PROPS:
+            out.append(
+                f"Visual data-pbi={label!r}: inline '{prop}' does not transfer to "
+                f"Power BI — use the theme, data-pbi-role, or data-pbi-color instead."
+            )
+        elif "gradient(" in value:
+            out.append(
+                f"Visual data-pbi={label!r}: inline '{prop}' uses a gradient, which does "
+                f"not transfer to Power BI — only solid colors transfer."
+            )
+    return out
+
+
+def _validate_node(attrs: dict[str, str], schema: ModelSchema) -> list[str]:
     raw_type = attrs.get("data-pbi", "")
     try:
         vtype = VisualType(raw_type)
@@ -189,8 +197,14 @@ def _validate_node(attrs: dict[str, str], schema: ModelSchema) -> None:
             f"Correct shapes for each type:\n{_example_for(None)}"
         ) from e
 
+    _check_unknown_attrs(attrs, vtype, raw_type)
+
     spec = VISUAL_ATTRS[vtype]
     for req in spec["required"]:
+        # Charts bound to a field parameter via data-pbi-values-param do not
+        # also need data-pbi-values — the param supplies the value role.
+        if req == "data-pbi-values" and "data-pbi-values-param" in attrs:
+            continue
         if req not in attrs or not attrs[req].strip():
             raise ValidationError(
                 f"Visual data-pbi={raw_type!r} is missing required attribute "
@@ -199,6 +213,9 @@ def _validate_node(attrs: dict[str, str], schema: ModelSchema) -> None:
 
     for attr in MEASURE_ATTRS:
         if attr in attrs:
+            # Bookmarks use data-pbi-target/visible/hidden as visual ids, not measures
+            if vtype is VisualType.BOOKMARK and attr in ("data-pbi-target", "data-pbi-visible", "data-pbi-hidden"):
+                continue
             _check_measure(attrs[attr], schema, attr, vtype)
 
     for attr in COLUMN_REF_ATTRS:
@@ -217,6 +234,16 @@ def _validate_node(attrs: dict[str, str], schema: ModelSchema) -> None:
             else:
                 _check_measure(token, schema, "data-pbi-columns", vtype)
 
+    # Validate button action — must be one of the supported behaviors.
+    if vtype is VisualType.BUTTON and "data-pbi-action" in attrs:
+        action = attrs["data-pbi-action"]
+        if action not in ("bookmark", "navigate", "back", "reset", "blank"):
+            raise ValidationError(
+                f"data-pbi-action={action!r} is invalid. "
+                f"Must be one of: 'bookmark', 'navigate', 'back', 'reset', 'blank'.\n"
+                f"Correct shape:\n{_example_for(vtype)}"
+            )
+
     # Validate slicer style — must be one of the three accepted values.
     if vtype is VisualType.SLICER and "data-pbi-style" in attrs:
         style = attrs["data-pbi-style"].lower()
@@ -227,6 +254,9 @@ def _validate_node(attrs: dict[str, str], schema: ModelSchema) -> None:
                 f"Correct shape:\n{_example_for(vtype)}"
             )
 
+    # field-param's data-pbi-measures is intentionally left unvalidated for now
+    # (measure-list checking for field parameters is out of scope for this task).
+
     # Validate multiRowCard measure list — every token must be a measure name.
     if vtype is VisualType.MULTI_ROW_CARD:
         for token in attrs.get("data-pbi-measures", "").split(","):
@@ -234,6 +264,44 @@ def _validate_node(attrs: dict[str, str], schema: ModelSchema) -> None:
             if not token:
                 continue
             _check_measure(token, schema, "data-pbi-measures", vtype)
+
+    # Cross-table axis/series reliability guardrail. When a chart groups by a
+    # series column on a different table than its axis column, the visual is
+    # blank in Power BI unless a relationship connects the two tables. We only
+    # check when BOTH an axis and a series are present — the series grouping is
+    # the fragile part. (data-pbi-values-param is irrelevant here: this guard is
+    # purely about axis vs series, so the `if axis and series` check covers it.)
+    warnings: list[str] = []
+    axis = attrs.get("data-pbi-axis")
+    series = attrs.get("data-pbi-series")
+    if axis and series:
+        axis_tbl = _table_of_column_ref(axis)
+        series_tbl = _table_of_column_ref(series)
+        if axis_tbl and series_tbl and axis_tbl != series_tbl:
+            if not _tables_related(schema, axis_tbl, series_tbl):
+                raise ValidationError(
+                    f"Visual data-pbi={raw_type!r}: axis column is on table "
+                    f"{axis_tbl!r} but series is on table {series_tbl!r}, and no "
+                    f"relationship connects them. The visual will be blank in Power "
+                    f"BI. Use columns from the same table, or add a relationship.\n"
+                    f"Correct shape:\n{_example_for(vtype)}"
+                )
+            warnings.append(
+                f"Visual data-pbi={raw_type!r}: axis is on {axis_tbl!r} and series "
+                f"on {series_tbl!r} (different tables). A relationship exists so it "
+                f"will render, but cross-table axis/series can behave unexpectedly. "
+                f"Prefer axis + series from the same table when possible."
+            )
+
+    # Check for bar chart time-axis heuristic warning
+    bar_time_warning = _bar_time_axis_warning(vtype, attrs, schema)
+    if bar_time_warning:
+        warnings.append(bar_time_warning)
+
+    # Check for inline styles that will not transfer to Power BI
+    warnings.extend(_inline_style_warnings(attrs))
+
+    return warnings
 
 
 def _check_measure(name: str, schema: ModelSchema, attr: str, vtype: VisualType) -> None:
@@ -269,3 +337,67 @@ def _check_column_ref(ref: str, schema: ModelSchema, attr: str, vtype: VisualTyp
             f"{col_name!r} in table {table_name!r}. "
             f"Available columns in {table_name}: {available}"
         )
+
+
+def _split_ids(value: str) -> list[str]:
+    return [t.strip() for t in value.split(",") if t.strip()]
+
+
+def _check_cross_references(nodes: list[dict[str, str]], pages: list[str] | None = None) -> None:
+    """Cross-visual checks: data-pbi-id uniqueness, bookmark id refs, button
+    bookmark/navigate refs. Mirrors what the emitter resolves later so failures surface
+    at lint time, not emit time."""
+    ids = [n["data-pbi-id"] for n in nodes if n.get("data-pbi-id")]
+    dupes = sorted({i for i in ids if ids.count(i) > 1})
+    if dupes:
+        raise ValidationError(
+            f"Duplicate data-pbi-id value(s): {dupes}. Each visual id must be unique."
+        )
+    id_set = set(ids)
+
+    bookmark_names = [
+        n.get("data-pbi-name", "") for n in nodes if n.get("data-pbi") == "bookmark"
+    ]
+    dup_names = sorted({b for b in bookmark_names if bookmark_names.count(b) > 1})
+    if dup_names:
+        raise ValidationError(f"Duplicate bookmark data-pbi-name value(s): {dup_names}.")
+    name_set = set(bookmark_names)
+
+    for n in nodes:
+        if n.get("data-pbi") == "bookmark":
+            for attr in ("data-pbi-visible", "data-pbi-hidden", "data-pbi-target"):
+                value = n.get(attr, "")
+                if attr == "data-pbi-target" and value.strip() == "all":
+                    continue
+                for token in _split_ids(value):
+                    if token not in id_set:
+                        raise ValidationError(
+                            f"Bookmark {n.get('data-pbi-name', '?')!r} ({attr}) references "
+                            f"unknown visual id {token!r}. Known ids: {sorted(id_set)}. "
+                            f"Give the target visual a data-pbi-id attribute."
+                        )
+        elif n.get("data-pbi") == "button":
+            action = n.get("data-pbi-action")
+            if action == "bookmark":
+                bm = n.get("data-pbi-bookmark", "").strip()
+                if not bm:
+                    raise ValidationError(
+                        'Button with data-pbi-action="bookmark" is missing data-pbi-bookmark. '
+                        f"Known bookmarks: {sorted(name_set)}"
+                    )
+                if bm not in name_set:
+                    raise ValidationError(
+                        f"Button references unknown bookmark {bm!r}. "
+                        f"Known bookmarks: {sorted(name_set)}"
+                    )
+            elif action == "navigate":
+                target_page = n.get("data-pbi-page", "").strip()
+                if not target_page:
+                    raise ValidationError(
+                        'Button with data-pbi-action="navigate" is missing data-pbi-page.'
+                    )
+                if pages and target_page not in pages:
+                    raise ValidationError(
+                        f"Button references unknown page {target_page!r}. "
+                        f"Known pages: {sorted(pages)}"
+                    )

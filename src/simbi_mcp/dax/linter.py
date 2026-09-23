@@ -10,6 +10,12 @@ confusing Power BI Desktop load errors. Rules:
     error    calculated table column missing sourceColumn property (required by
              Power BI Desktop's TMDL serializer even for calculated tables)
     error    lineageTag is not a full UUID (truncated hex is silently misread)
+    error    `mode: calculated` in a partition block (not a valid ModeType —
+             crashes Power BI Desktop on open with InvalidValueFormat)
+    error    `partition X = dax` source type (no such PartitionSourceType — the
+             valid keyword is `calculated`; crashes on open)
+    error    table missing partition definition (crashes Power BI Desktop on
+             open with 'composite model with entity based query sources')
     warning  SEARCH() called without a 4th argument (errors on no-match)
     warning  aggregation of a year-literal column (likely wide-format mistake)
 
@@ -69,9 +75,14 @@ _SEQUENTIAL_GUID_RE = re.compile(
 _RELATIONSHIP_GUID_RE = re.compile(r"^relationship\s+(\S+)\s*$", re.MULTILINE)
 _LINEAGE_TAG_RE = re.compile(r"lineageTag:\s*(\S+)")
 _CALC_TABLE_RE = re.compile(r"partition\s+\S+\s*=\s*calculated", re.IGNORECASE)
-_TABLE_BLOCK_RE = re.compile(r"^table\s+(\S+)", re.MULTILINE)
+_INVALID_MODE_RE = re.compile(r"^[ \t]+mode:\s+calculated\s*$", re.MULTILINE)
+_DAX_PARTITION_SOURCE_RE = re.compile(
+    r"^[ \t]*partition[ \t]+.+?[ \t]*=[ \t]*dax[ \t]*$", re.MULTILINE
+)
+_TABLE_BLOCK_RE = re.compile(r"^[ \t]*table[ \t]+(?P<name>'[^']+'|\"[^\"]+\"|\S+)", re.MULTILINE)
 _COLUMN_BLOCK_RE = re.compile(r"^\t(column\s+\S.*)", re.MULTILINE)
 _SOURCE_COL_RE = re.compile(r"\bsourceColumn\s*:", re.IGNORECASE)
+_PARTITION_DEF_RE = re.compile(r"^[ \t]*partition\b", re.MULTILINE)
 
 
 def lint_measures(tmdl: str) -> list[LintFinding]:
@@ -85,8 +96,12 @@ def lint_measures(tmdl: str) -> list[LintFinding]:
 
     # Structural checks (TMDL-level, not per-measure)
     findings.extend(_check_relationship_guids(tmdl))
+    findings.extend(_check_dangling_variations(tmdl))
     findings.extend(_check_lineage_tags(tmdl))
     findings.extend(_check_calc_table_source_columns(tmdl))
+    findings.extend(_check_table_partitions(tmdl))
+    findings.extend(_check_invalid_partition_mode(tmdl))
+    findings.extend(_check_invalid_partition_source(tmdl))
 
     # DAX expression checks (per-measure)
     for measure in schema.measures:
@@ -145,6 +160,30 @@ def _check_relationship_guids(tmdl: str) -> list[LintFinding]:
                     f"Generate a real random UUID."
                 ),
             ))
+    return findings
+
+
+_VARIATION_REL_RE = re.compile(r"^[ \t]*relationship:\s*(\S+)", re.MULTILINE)
+
+
+def _check_dangling_variations(tmdl: str) -> list[LintFinding]:
+    findings: list[LintFinding] = []
+    defined_rels = set(_RELATIONSHIP_GUID_RE.findall(tmdl))
+    for match in _VARIATION_REL_RE.finditer(tmdl):
+        target = match.group(1).strip("'\"")
+        if target not in defined_rels:
+            findings.append(
+                LintFinding(
+                    severity=LintSeverity.ERROR,
+                    measure="(variation)",
+                    rule="missing-variation-relationship",
+                    message=(
+                        f"Variation references relationship {target!r} which is not "
+                        f"defined in the model's relationship blocks. Power BI Desktop "
+                        f"rejects models with unresolved variation relationships."
+                    ),
+                )
+            )
     return findings
 
 
@@ -207,6 +246,97 @@ def _check_calc_table_source_columns(tmdl: str) -> list[LintFinding]:
                         f"sourceColumn: {col_name}"
                     ),
                 ))
+    return findings
+
+
+def _check_invalid_partition_mode(tmdl: str) -> list[LintFinding]:
+    """Detect `mode: calculated` in any partition block.
+
+    `calculated` is the partition SOURCE type, not a ModeType. As a `mode:`
+    value it is invalid (valid ModeTypes: import, directQuery, dual) and Power
+    BI Desktop raises InvalidValueFormat on open. A calculated partition keeps
+    `= calculated` and uses `mode: import`.
+    """
+    if not _INVALID_MODE_RE.search(tmdl):
+        return []
+    return [
+        LintFinding(
+            severity=LintSeverity.ERROR,
+            measure="(structure)",
+            rule="invalid-partition-mode",
+            message=(
+                "'mode: calculated' is not a valid TMDL ModeType and causes "
+                "Power BI Desktop to refuse loading the model "
+                "(valid ModeTypes: import, directQuery, dual). "
+                "Keep the partition's '= calculated' source type and change the "
+                "mode line to 'mode: import'."
+            ),
+        )
+    ]
+
+
+def _check_invalid_partition_source(tmdl: str) -> list[LintFinding]:
+    """Detect the fictional `= dax` partition source type.
+
+    A DAX/calculated table's partition source type is `calculated`, not `dax`.
+    `partition X = dax` makes Power BI Desktop raise InvalidValueFormat on open
+    ("Failed to convert the value 'dax' to ... PartitionSourceType"). This guard
+    exists because an earlier lint message wrongly described the source type as
+    `= dax`; do NOT reintroduce that keyword.
+    """
+    if not _DAX_PARTITION_SOURCE_RE.search(tmdl):
+        return []
+    return [
+        LintFinding(
+            severity=LintSeverity.ERROR,
+            measure="(structure)",
+            rule="invalid-partition-source",
+            message=(
+                "'partition ... = dax' uses a PartitionSourceType that does not "
+                "exist; Power BI Desktop refuses to open the model. The valid "
+                "source type for a DAX/calculated table is 'calculated'. Change "
+                "'= dax' to '= calculated' and add 'mode: import'."
+            ),
+        )
+    ]
+
+
+def _check_table_partitions(tmdl: str) -> list[LintFinding]:
+    """Check that every table in the TMDL has at least one partition defined.
+
+    Power BI Desktop requires every table to have a partition. Tables without
+    partitions cannot be loaded into Analysis Services and fail schema validation
+    with: 'Model validation failed. A composite model cannot be used with entity
+    based query sources'.
+    """
+    findings: list[LintFinding] = []
+    table_matches = list(_TABLE_BLOCK_RE.finditer(tmdl))
+    for i, match in enumerate(table_matches):
+        start = match.start()
+        end = table_matches[i + 1].start() if i + 1 < len(table_matches) else len(tmdl)
+        block = tmdl[start:end]
+        raw_name = match.group("name").strip()
+        table_name = raw_name.strip("'\"")
+
+        if not _PARTITION_DEF_RE.search(block):
+            safe_name = f"'{table_name}'" if re.search(r"\s", table_name) else table_name
+            findings.append(
+                LintFinding(
+                    severity=LintSeverity.ERROR,
+                    measure="(structure)",
+                    rule="table-missing-partition",
+                    message=(
+                        f"Table {table_name!r} has no partition defined. Every table "
+                        f"in TMDL must have a partition. Power BI Desktop refuses to load "
+                        f"models containing partitionless tables (crashes with 'Model "
+                        f"validation failed. A composite model cannot be used with entity "
+                        f"based query sources'). For a dedicated measures table, add:\n"
+                        f"\tpartition {safe_name} = calculated\n"
+                        f"\t\tmode: import\n"
+                        f"\t\tsource = {{BLANK()}}"
+                    ),
+                )
+            )
     return findings
 
 

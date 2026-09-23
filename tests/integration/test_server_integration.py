@@ -40,6 +40,11 @@ _SALES_SCHEMA = ModelSchema(
 )
 
 
+def _report_dir_from_result(text: str) -> Path:
+    """emit_report now returns a multi-line report; the .Report path is the first line."""
+    return Path(text.splitlines()[0].removeprefix(".Report written: "))
+
+
 def _seed_pbip(tmp_path: Path, name: str) -> Path:
     """Simulate the .pbip + .SemanticModel that Power BI Desktop / MCP would have created."""
     pbip = tmp_path / f"{name}.pbip"
@@ -64,7 +69,7 @@ async def test_emit_report_returns_report_dir_path(tmp_path: Path) -> None:
             "pbip_path": str(pbip),
         },
     )
-    report_dir = Path(result["result"])
+    report_dir = _report_dir_from_result(result["result"])
     assert report_dir == tmp_path / "TestDashboard.Report"
     assert report_dir.is_dir()
 
@@ -86,6 +91,28 @@ async def test_emit_report_preserves_existing_pbip_and_model(tmp_path: Path) -> 
     # SimBI must not touch the .pbip or .SemanticModel
     assert pbip.read_text() == original_pbip
     assert (tmp_path / "TestDashboard.SemanticModel").is_dir()
+
+
+@pytest.mark.skipif(not _CHROME_EXE.exists(), reason="System Chrome not found")
+async def test_emit_report_warns_when_creating_table_with_no_data_connection(
+    tmp_path: Path,
+) -> None:
+    """A blank .SemanticModel (no existing table .tmdl) means emit_report falls
+    back to creating a columns/measures-only table with no partition — silent
+    and easy to miss. The tool's own output must say so loudly, since prose
+    instructions alone don't reliably stop a caller from skipping
+    write_semantic_model and going straight to emit_report."""
+    pbip = _seed_pbip(tmp_path, "TestDashboard")
+    html = (_FIXTURES_HTML / "valid_dashboard.html").read_text()
+    schema_json = _SALES_SCHEMA.model_dump_json()
+    _, result = await mcp.call_tool(
+        "emit_report",
+        {"html": html, "schema_json": schema_json, "pbip_path": str(pbip)},
+    )
+    text = result["result"]
+    assert "sales" in text
+    assert "no data source connected" in text
+    assert "write_semantic_model" in text
 
 
 @pytest.mark.skipif(not _CHROME_EXE.exists(), reason="System Chrome not found")
@@ -138,7 +165,7 @@ async def test_emit_report_accepts_folder_and_finds_pbip(tmp_path: Path) -> None
             "pbip_path": str(tmp_path),  # folder, not file
         },
     )
-    assert Path(result["result"]) == tmp_path / "TestDashboard.Report"
+    assert _report_dir_from_result(result["result"]) == tmp_path / "TestDashboard.Report"
 
 
 async def test_emit_report_rejects_ambiguous_folder(tmp_path: Path) -> None:

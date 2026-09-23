@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from simbi_mcp.server import mcp
 from simbi_mcp.types import ModelSchema
 
@@ -73,3 +75,147 @@ def test_main_is_importable_from_package() -> None:
     from simbi_mcp import main
     from simbi_mcp.server import main as server_main
     assert main is server_main
+
+
+def _scaffold_pbip(tmp_path) -> str:
+    pbip = tmp_path / "Test.pbip"
+    pbip.write_text("{}", encoding="utf-8")
+    definition = tmp_path / "Test.SemanticModel" / "definition"
+    (definition / "tables").mkdir(parents=True)
+    (definition / "model.tmdl").write_text(
+        "model Model\n\tculture: en-US\n\nref cultureInfo en-US\n", encoding="utf-8"
+    )
+    return str(pbip)
+
+
+async def test_write_semantic_model_tool_persists_table(tmp_path) -> None:
+    pbip_path = _scaffold_pbip(tmp_path)
+    tmdl = (
+        "table sales\n"
+        "\tlineageTag: 11111111-1111-4111-8111-111111111111\n\n"
+        "\tcolumn Region\n\t\tdataType: string\n"
+        "\t\tlineageTag: 22222222-2222-4222-8222-222222222222\n\n"
+        "\tpartition sales = m\n\t\tmode: import\n\t\tsource = let x = 1 in x\n\n"
+        "\tmeasure 'Total Revenue' = SUM(sales[Value])\n"
+    )
+    _, result = await mcp.call_tool(
+        "write_semantic_model", {"tmdl": tmdl, "pbip_path": pbip_path}
+    )
+    text = result["result"]
+    assert "Semantic model written" in text
+    written = tmp_path / "Test.SemanticModel" / "definition" / "tables" / "sales.tmdl"
+    assert written.exists()
+    assert "measure 'Total Revenue'" in written.read_text(encoding="utf-8")
+
+
+async def test_write_semantic_model_tool_reports_renames(tmp_path) -> None:
+    pbip_path = _scaffold_pbip(tmp_path)
+    tmdl = (
+        "table Measures\n"
+        "\tlineageTag: 33333333-3333-4333-8333-333333333333\n\n"
+        "\tmeasure 'X' = 1\n\n"
+        "\tpartition Measures = calculated\n\t\tmode: import\n\t\tsource = {1}\n"
+    )
+    _, result = await mcp.call_tool(
+        "write_semantic_model", {"tmdl": tmdl, "pbip_path": pbip_path}
+    )
+    assert "_Measures" in result["result"]
+
+
+async def test_write_semantic_model_tool_raises_on_bad_indentation(tmp_path) -> None:
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    pbip_path = _scaffold_pbip(tmp_path)
+    tmdl = (
+        "table sales\n"
+        "\tlineageTag: 11111111-1111-4111-8111-111111111111\n\n"
+        "\tcolumn Region\n\t\tdataType: string\n"
+        "\t\tlineageTag: 22222222-2222-4222-8222-222222222222\n\n"
+        "\tpartition sales = m\n\t\tmode: import\n\t\tsource = let x = 1 in x\n\n"
+        "  measure 'Total Revenue' = SUM(sales[Value])\n"
+    )
+    with pytest.raises(ToolError, match="(?i)tab"):
+        await mcp.call_tool(
+            "write_semantic_model", {"tmdl": tmdl, "pbip_path": pbip_path}
+        )
+
+
+async def test_emit_report_output_format_first_line_is_report_path() -> None:
+    # Contract test on the formatter, not the pipeline: format_emit_result is a
+    # pure function so no Chrome/pbip is needed.
+    from pathlib import Path
+
+    from simbi_mcp.pbir.emitter import EmitResult
+    from simbi_mcp.server import _format_emit_result
+
+    result = EmitResult(
+        report_dir=Path("C:/x/R.Report"),
+        previews=[Path("C:/x/simbi-preview/Overview.png")],
+        styling_notes=["card 'Total Revenue': background #FFFFFF"],
+        warnings=["something to know"],
+    )
+    text = _format_emit_result(result, validator_warnings=["w1"])
+    lines = text.splitlines()
+    assert lines[0] == ".Report written: C:\\x\\R.Report" or lines[0] == ".Report written: C:/x/R.Report"
+    assert any("NOT a Power BI render" in line for line in lines)
+    assert any("Overview.png" in line for line in lines)
+    assert any("background #FFFFFF" in line for line in lines)
+    assert any("w1" in line for line in lines)
+    assert any("something to know" in line for line in lines)
+
+
+async def test_get_vocabulary_tool_returns_full_spec() -> None:
+    _, result = await mcp.call_tool("get_vocabulary", {})
+    text = result["result"]
+    assert "ANNOTATION VOCABULARY" in text
+    assert "UNIVERSAL ATTRIBUTES" in text
+    assert "STYLING CONTRACT" in text
+    assert "AVAILABLE CSS CLASSES" in text
+    assert "waterfallChart" in text  # a type the old docstring never mentioned
+
+
+async def test_get_theme_schema_tool_returns_schema() -> None:
+    _, result = await mcp.call_tool("get_theme_schema", {})
+    text = result["result"]
+    assert "THEME SCHEMA" in text
+    assert "CY25SU10" in text
+    assert "dataColors" in text
+    assert "visualStyles" in text
+    assert "get_vocabulary" in text
+
+
+async def test_all_tool_descriptions_within_client_budget() -> None:
+    tools = await mcp.list_tools()
+    assert tools, "no tools registered"
+    for tool in tools:
+        desc = tool.description or ""
+        assert len(desc) <= 1000, (
+            f"Tool {tool.name!r} description is {len(desc)} chars (max 1000) — "
+            f"MCP clients truncate long descriptions mid-sentence."
+        )
+
+
+async def test_emit_report_docstring_points_to_vocabulary() -> None:
+    tools = await mcp.list_tools()
+    emit = next(t for t in tools if t.name == "emit_report")
+    assert "get_vocabulary" in (emit.description or "")
+    assert "columnChart" not in (emit.description or ""), "stale vocab list must be gone"
+
+
+async def test_analyze_data_source_tool_profiles_csv() -> None:
+    import json
+    from pathlib import Path
+
+    csv_path = Path(__file__).parent.parent / "fixtures" / "datasets" / "sales_small.csv"
+    _, result = await mcp.call_tool("analyze_data_source", {"path": str(csv_path)})
+    data = json.loads(result["result"])
+    assert data["tables"][0]["table_name"] == "sales_small"
+    order_id = next(c for c in data["tables"][0]["columns"] if c["name"] == "OrderID")
+    assert "likely primary key" in order_id["hints"]
+
+
+async def test_analyze_data_source_tool_raises_on_missing_file() -> None:
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    with pytest.raises(ToolError, match="File not found"):
+        await mcp.call_tool("analyze_data_source", {"path": "nope.csv"})

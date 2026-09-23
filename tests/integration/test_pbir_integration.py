@@ -48,12 +48,13 @@ def schema() -> ModelSchema:
 @pytest.mark.skipif(not _CHROME_EXE.exists(), reason="System Chrome not found")
 async def test_emit_pbir_creates_report_folder(schema: ModelSchema, tmp_path: Path) -> None:
     html = (_FIXTURES_HTML / "valid_dashboard.html").read_text()
-    report_dir = await emit_pbir(
+    result = await emit_pbir(
         html=html,
         schema=schema,
         report_name="TestDashboard",
         output_dir=tmp_path,
     )
+    report_dir = result.report_dir
     assert report_dir == tmp_path / "TestDashboard.Report"
     assert (report_dir / "definition.pbir").exists()
     assert (report_dir / "definition" / "version.json").exists()
@@ -66,13 +67,13 @@ async def test_emit_pbir_generates_correct_visual_count(
 ) -> None:
     # valid_dashboard.html: 2 cards + 1 slicer + 1 columnChart = 4 visuals
     html = (_FIXTURES_HTML / "valid_dashboard.html").read_text()
-    report_dir = await emit_pbir(
+    result = await emit_pbir(
         html=html,
         schema=schema,
         report_name="TestDashboard",
         output_dir=tmp_path,
     )
-    pages_dir = report_dir / "definition" / "pages"
+    pages_dir = result.report_dir / "definition" / "pages"
     page_guid = next(p for p in pages_dir.iterdir() if p.is_dir()).name
     visual_files = list((pages_dir / page_guid / "visuals").glob("*/visual.json"))
     assert len(visual_files) == 4
@@ -81,13 +82,13 @@ async def test_emit_pbir_generates_correct_visual_count(
 @pytest.mark.skipif(not _CHROME_EXE.exists(), reason="System Chrome not found")
 async def test_emit_pbir_visual_json_is_valid(schema: ModelSchema, tmp_path: Path) -> None:
     html = (_FIXTURES_HTML / "valid_dashboard.html").read_text()
-    report_dir = await emit_pbir(
+    result = await emit_pbir(
         html=html,
         schema=schema,
         report_name="TestDashboard",
         output_dir=tmp_path,
     )
-    pages_dir = report_dir / "definition" / "pages"
+    pages_dir = result.report_dir / "definition" / "pages"
     page_guid = next(p for p in pages_dir.iterdir() if p.is_dir()).name
     for vf in (pages_dir / page_guid / "visuals").glob("*/visual.json"):
         data = json.loads(vf.read_text())
@@ -104,11 +105,11 @@ async def test_emit_pbir_visual_json_is_valid(schema: ModelSchema, tmp_path: Pat
 @pytest.mark.skipif(not _CHROME_EXE.exists(), reason="System Chrome not found")
 async def test_emit_pbir_semantic_model_ref(schema: ModelSchema, tmp_path: Path) -> None:
     html = (_FIXTURES_HTML / "valid_dashboard.html").read_text()
-    report_dir = await emit_pbir(
+    result = await emit_pbir(
         html=html,
         schema=schema,
         report_name="TestDashboard",
         output_dir=tmp_path,
     )
-    content = json.loads((report_dir / "definition.pbir").read_text())
+    content = json.loads((result.report_dir / "definition.pbir").read_text())
     assert content["datasetReference"]["byPath"]["path"] == "../TestDashboard.SemanticModel"
