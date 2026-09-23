@@ -186,11 +186,11 @@ def container_objects_from_styles(
 def shape_objects_from_styles(
     styles: dict[str, str], attrs: dict[str, str]
 ) -> tuple[dict, list[str], list[str]]:
-    """Map CSS/attrs to shape GEOMETRY objects (fill/outline/roundEdge).
+    """Map CSS/attrs to shape GEOMETRY objects (fill/outline).
 
     data-pbi-fill / data-pbi-stroke beat computed CSS. Structure verified
     against resources/PowerBI_Files/Card with Context (fill + outline with
-    selector id=default, roundEdge L-suffixed).
+    selector id=default).
     """
     out: dict = {}
     honored: list[str] = []
@@ -225,10 +225,6 @@ def shape_objects_from_styles(
         ]
         honored.append(f"stroke {stroke[0]}")
 
-    radius = parse_px(styles.get("borderRadius", ""))
-    if radius > 0:
-        out["shape"] = [{"properties": {"roundEdge": literal(f"{round(radius)}L")}}]
-        honored.append(f"roundEdge {round(radius)}")
     return out, honored, warnings
 
 

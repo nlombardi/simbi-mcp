@@ -103,7 +103,7 @@ def test_view_toggle_composition(schema):
         assert len(visible) == 1
         assert len(hidden) == 2
 
-    # (d) each button resolves to a distinct bookmark guid via visualLink
+    # (d) each button resolves to a distinct bookmark guid via visualContainerObjects.visualLink
     resolve_button_actions(visuals, name_to_guid)
     button_links = []
     for v in visuals:

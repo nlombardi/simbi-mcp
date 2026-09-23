@@ -129,7 +129,7 @@ def build_visual_json(
             {"properties": {"show": {"expr": {"Literal": {"Value": "false"}}}}}
         ]
     # WYSIWYG styling: computed CSS transfers to PBIR. Shapes style their
-    # geometry (fill/outline/roundEdge); everything else styles the container.
+    # geometry (fill/outline); everything else styles the container.
     if vtype is VisualType.SHAPE:
         style_objs, style_honored, style_warnings = shape_objects_from_styles(
             node.styles, node.attrs
@@ -157,11 +157,11 @@ def build_visual_json(
         "$schema": _VISUAL_SCHEMA,
         "name": _new_guid(),
         "position": {
-            "x": node.x,
-            "y": node.y,
+            "x": round(node.x),
+            "y": round(node.y),
             "z": z_order,
-            "height": height,
-            "width": node.width,
+            "height": round(height),
+            "width": round(node.width),
             "tabOrder": z_order,
         },
         "visual": visual,
@@ -194,13 +194,15 @@ def build_visual_json(
         # view-toggle stacked charts that default to one visible chart.
         container["isHidden"] = True
     if vtype is VisualType.BUTTON:
-        # The bookmark ACTION resolves in a later pass once bookmark GUIDs are
-        # known. Stash the intent on the container; the writer rewrites it into
-        # visualContainerObjects.visualLink (and strips simbiButtonAction).
+        # The button ACTION resolves in a later pass once bookmark and page GUIDs
+        # are known. Stash the intent on the container; emitter rewrites it into
+        # visual.objects.action (and strips simbiButtonAction).
         action = node.attrs["data-pbi-action"]
         intent: dict[str, str] = {"type": action}
         if action == "bookmark":
             intent["bookmark"] = node.attrs.get("data-pbi-bookmark", "")
+        elif action == "navigate":
+            intent["page"] = node.attrs.get("data-pbi-page", "")
         container["simbiButtonAction"] = intent
     if vtype is VisualType.SLICER:
         slicer_style = node.attrs.get("data-pbi-style", "dropdown").lower()
@@ -315,9 +317,9 @@ def _build_chrome_visual(
     """Build the `visual` object for a no-query chrome visual (shape/text/button).
 
     These never carry a `query` key; only the structural content (shapeType /
-    paragraph text / button label) is emitted here. Shape fill/outline/roundEdge
+    paragraph text / button label) is emitted here. Shape fill/outline
     are merged in separately by build_visual_json (data-pbi-fill/data-pbi-stroke
-    or computed CSS, via shape_objects_from_styles) — this function only seeds
+    or computed CSS, via shape_objects_from_styles): this function only seeds
     shape's tileShape. The button's bookmark action is stashed on the container
     by build_visual_json, not here, because it resolves in a later pass once
     bookmark GUIDs are known.
@@ -343,7 +345,25 @@ def _build_chrome_visual(
                     "properties": {"text": {"expr": {"Literal": {"Value": f"'{label}'"}}}},
                     "selector": {"id": "default"},
                 },
-            ]
+            ],
+            "outline": [
+                {"properties": {"show": {"expr": {"Literal": {"Value": "false"}}}}},
+                {
+                    "properties": {
+                        "show": {"expr": {"Literal": {"Value": "false"}}},
+                        "weight": {"expr": {"Literal": {"Value": "0D"}}},
+                        "transparency": {"expr": {"Literal": {"Value": "100D"}}},
+                    },
+                    "selector": {"id": "default"},
+                },
+            ],
+            "fill": [
+                {"properties": {"show": {"expr": {"Literal": {"Value": "false"}}}}},
+                {
+                    "properties": {"show": {"expr": {"Literal": {"Value": "false"}}}},
+                    "selector": {"id": "default"},
+                },
+            ],
         }
     else:  # VisualType.TEXT
         text = attrs["data-pbi-text"]

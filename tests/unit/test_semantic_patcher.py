@@ -4,7 +4,11 @@ from pathlib import Path
 import pytest
 
 from simbi_mcp.pbir.reserved_names import sanitize_schema
-from simbi_mcp.pbir.semantic_patcher import patch_semantic_model_measures
+from simbi_mcp.pbir.semantic_patcher import (
+    _build_minimal_tmdl,
+    _new_guid,
+    patch_semantic_model_measures,
+)
 from simbi_mcp.types import ModelMeasure, ModelSchema, ModelTable, ModelColumn, ModelRelationship
 
 
@@ -309,3 +313,44 @@ class TestReservedNames:
         model_content = (sm / "definition" / "model.tmdl").read_text(encoding="utf-8")
         assert "ref table _Measures" in model_content
         assert "ref table Measures\n" not in model_content
+
+
+class TestBuildMinimalTmdlPartitions:
+    def test_empty_columns_generates_calculated_partition(self) -> None:
+        tmdl = _build_minimal_tmdl(
+            table_name="_Measures",
+            columns=[],
+            measures=[ModelMeasure(name="Total", table="_Measures", expression="1", return_type="integer")],
+        )
+        assert "partition _Measures = calculated" in tmdl
+        assert "mode: import" in tmdl
+        assert "source = {BLANK()}" in tmdl
+
+    def test_columns_generates_m_partition(self) -> None:
+        tmdl = _build_minimal_tmdl(
+            table_name="Sales",
+            columns=[ModelColumn(name="Region", data_type="string"), ModelColumn(name="Amount", data_type="double")],
+            measures=[],
+        )
+        assert "partition Sales = m" in tmdl
+        assert "mode: import" in tmdl
+        assert '#table({"Region", "Amount"}, {})' in tmdl
+
+    def test_new_guid_produces_full_uuid(self) -> None:
+        import re
+        guid = _new_guid()
+        assert len(guid) == 36
+        assert re.match(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", guid)
+
+    def test_new_table_with_columns_syncs_pbi_query_order(self, tmp_path: Path) -> None:
+        sm = _scaffold_semantic_model(tmp_path)
+        schema = _make_schema(
+            "Economic Data",
+            "GDP",
+            columns=[ModelColumn(name="Country", data_type="string")],
+        )
+        patch_semantic_model_measures(schema, sm)
+
+        model_content = (sm / "definition" / "model.tmdl").read_text(encoding="utf-8")
+        assert 'annotation PBI_QueryOrder = ["Economic Data"]' in model_content
+

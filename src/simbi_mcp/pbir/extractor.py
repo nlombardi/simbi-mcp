@@ -18,7 +18,7 @@ _VIEWPORT: ViewportSize = {"width": 1280, "height": 720}
 
 _JS_EXTRACT = """
 () => {
-  const pageContainers = document.querySelectorAll('[data-pbi-page]');
+  const pageContainers = document.querySelectorAll('[data-pbi-page]:not([data-pbi])');
   const groups = pageContainers.length > 0
     ? Array.from(pageContainers).map((el, i) => ({
         el, index: i, name: el.getAttribute('data-pbi-page') || ('Page ' + (i + 1)),
@@ -122,7 +122,7 @@ async def extract_visuals(
             if screenshot_dir is not None:
                 try:
                     screenshot_dir.mkdir(parents=True, exist_ok=True)
-                    containers = page.locator("[data-pbi-page]")
+                    containers = page.locator("[data-pbi-page]:not([data-pbi])")
                     count = await containers.count()
                     if count == 0:
                         dest = screenshot_dir / "Page 1.png"

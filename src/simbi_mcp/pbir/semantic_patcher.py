@@ -12,6 +12,7 @@ because those measures will already be in the file and are skipped.
 """
 from __future__ import annotations
 
+import json
 import re
 import uuid
 from pathlib import Path
@@ -97,6 +98,7 @@ def patch_semantic_model_measures(schema: ModelSchema, semantic_model_dir: Path)
 
     if newly_created:
         _register_ref_tables(semantic_model_dir, newly_created)
+        _sync_pbi_query_order(semantic_model_dir)
 
     return [
         f"Table {name!r} had no existing .tmdl — created it with columns/measures "
@@ -225,7 +227,7 @@ def _build_minimal_tmdl(
     columns: list[ModelColumn],
     measures: list[ModelMeasure],
 ) -> str:
-    """Build a complete table TMDL with columns and measures but no data partition."""
+    """Build a complete table TMDL with columns, measures, and a valid partition."""
     parts: list[str] = [
         f"table {_quote_name(table_name)}",
         f"\tlineageTag: {_new_guid()}",
@@ -241,6 +243,25 @@ def _build_minimal_tmdl(
             f"\t\tlineageTag: {_new_guid()}",
             f"\t\tsummarizeBy: none",
             f"\t\tsourceColumn: {col.name}",
+            "",
+        ]
+    if not columns:
+        parts += [
+            f"\tpartition {_quote_name(table_name)} = calculated",
+            f"\t\tmode: import",
+            f"\t\tsource = {{BLANK()}}",
+            "",
+        ]
+    else:
+        col_names = ", ".join(f'"{col.name}"' for col in columns)
+        parts += [
+            f"\tpartition {_quote_name(table_name)} = m",
+            f"\t\tmode: import",
+            f"\t\tsource =",
+            f"\t\t\tlet",
+            f"\t\t\t\tSource = #table({{{col_names}}}, {{}})",
+            f"\t\t\tin",
+            f"\t\t\t\tSource",
             "",
         ]
     return "\n".join(parts)
@@ -304,5 +325,133 @@ def _register_ref_tables(semantic_model_dir: Path, table_names: list[str]) -> No
     model_tmdl.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
 
 
+_REF_TABLE_LINE_RE = re.compile(r"^[ \t]*ref[ \t]+table[ \t]+(?P<name>.+?)[ \t]*$")
+
+
+def _sync_ref_tables(semantic_model_dir: Path, surviving_tables: set[str]) -> None:
+    """Synchronize `ref table <Name>` lines in model.tmdl with surviving tables on disk.
+
+    Removes any `ref table` line whose table is not in surviving_tables, and adds
+    missing `ref table` lines for any surviving table not yet referenced.
+    """
+    model_tmdl = semantic_model_dir / "definition" / "model.tmdl"
+    if not model_tmdl.exists():
+        return
+
+    existing = model_tmdl.read_text(encoding="utf-8")
+    lines = existing.splitlines()
+
+    new_lines: list[str] = []
+    referenced_tables: set[str] = set()
+
+    for line in lines:
+        m = _REF_TABLE_LINE_RE.match(line)
+        if m:
+            raw = m.group("name").strip()
+            tbl_name = (
+                raw[1:-1]
+                if (raw.startswith("'") and raw.endswith("'"))
+                or (raw.startswith('"') and raw.endswith('"'))
+                else raw
+            )
+            if tbl_name in surviving_tables:
+                new_lines.append(line)
+                referenced_tables.add(tbl_name)
+            # Stale table reference is pruned
+        else:
+            new_lines.append(line)
+
+    to_add = [t for t in sorted(surviving_tables) if t not in referenced_tables]
+    if to_add:
+        ref_lines = [f"ref table {_quote_name(t)}" for t in to_add]
+        insert_at = len(new_lines)
+        for i, line in enumerate(new_lines):
+            if line.startswith("ref cultureInfo"):
+                insert_at = i
+                break
+        new_lines = new_lines[:insert_at] + ref_lines + new_lines[insert_at:]
+
+    model_tmdl.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
+
 def _new_guid() -> str:
-    return uuid.uuid4().hex[:20]
+    return str(uuid.uuid4())
+
+
+_M_PARTITION_RE = re.compile(
+    r"^[ \t]*partition[ \t]+.+?[ \t]*=[ \t]*m\b", re.IGNORECASE | re.MULTILINE
+)
+_PBI_QUERY_ORDER_RE = re.compile(
+    r"^(?P<indent>[ \t]*)annotation[ \t]+PBI_QueryOrder[ \t]*=[ \t]*(?P<val>\[.*?\])[ \t]*$",
+    re.MULTILINE,
+)
+
+
+def _sync_pbi_query_order(semantic_model_dir: Path) -> None:
+    """Synchronize `annotation PBI_QueryOrder` in model.tmdl with surviving M-partitioned tables.
+
+    Power BI Desktop's mashup engine uses PBI_QueryOrder to construct Section1 formulas.
+    If PBI_QueryOrder contains deleted tables or omits active M-partitioned tables,
+    Power BI Desktop fails to load Mashup cubes with:
+    'Model validation failed. A composite model cannot be used with entity based query sources'.
+
+    This function:
+    - Scans definition/tables/*.tmdl for tables with an M partition (`partition ... = m`).
+    - Removes non-existent or non-M tables from PBI_QueryOrder.
+    - Appends any surviving M-partitioned tables not yet listed.
+    - Updates model.tmdl in place (or inserts PBI_QueryOrder if M tables exist).
+    """
+    definition = semantic_model_dir / "definition"
+    tables_dir = definition / "tables"
+    model_tmdl = definition / "model.tmdl"
+
+    if not tables_dir.exists() or not model_tmdl.exists():
+        return
+
+    # Find all tables with partition ... = m
+    surviving_m_tables: set[str] = set()
+    for table_file in tables_dir.glob("*.tmdl"):
+        try:
+            content = table_file.read_text(encoding="utf-8")
+            if _M_PARTITION_RE.search(content):
+                surviving_m_tables.add(table_file.stem)
+        except Exception:
+            continue
+
+    existing_content = model_tmdl.read_text(encoding="utf-8")
+    match = _PBI_QUERY_ORDER_RE.search(existing_content)
+
+    if match:
+        try:
+            old_list = json.loads(match.group("val"))
+            if not isinstance(old_list, list):
+                old_list = []
+        except Exception:
+            old_list = []
+
+        # Keep existing order for surviving M tables, prune deleted/non-M tables
+        new_list = [t for t in old_list if t in surviving_m_tables]
+        for t in sorted(surviving_m_tables):
+            if t not in new_list:
+                new_list.append(t)
+
+        indent = match.group("indent")
+        replacement_line = f"{indent}annotation PBI_QueryOrder = {json.dumps(new_list)}"
+        new_content = (
+            existing_content[: match.start()]
+            + replacement_line
+            + existing_content[match.end() :]
+        )
+        if new_content != existing_content:
+            model_tmdl.write_text(new_content, encoding="utf-8")
+    elif surviving_m_tables:
+        new_list = sorted(surviving_m_tables)
+        lines = existing_content.splitlines()
+        insert_at = len(lines)
+        for i, line in enumerate(lines):
+            if line.lstrip().startswith("ref table") or line.lstrip().startswith("ref cultureInfo"):
+                insert_at = i
+                break
+        annotation_line = f"annotation PBI_QueryOrder = {json.dumps(new_list)}"
+        lines.insert(insert_at, annotation_line)
+        model_tmdl.write_text("\n".join(lines) + "\n", encoding="utf-8")

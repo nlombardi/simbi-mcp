@@ -705,6 +705,31 @@
           {
             "show": false
           }
+        ],
+        "outline": [
+          {
+            "show": false
+          },
+          {
+            "$id": "default",
+            "weight": 0,
+            "transparency": 100
+          },
+          {
+            "$id": "hover",
+            "weight": 0,
+            "transparency": 100
+          },
+          {
+            "$id": "selected",
+            "weight": 0,
+            "transparency": 100
+          }
+        ],
+        "border": [
+          {
+            "show": false
+          }
         ]
       }
     },

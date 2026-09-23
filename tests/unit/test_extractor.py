@@ -131,3 +131,8 @@ def test_safe_filename() -> None:
 def test_extract_result_shape() -> None:
     r = ExtractResult(nodes=[], previews=[], warnings=[])
     assert r.nodes == [] and r.previews == [] and r.warnings == []
+
+
+def test_js_extract_scopes_page_containers() -> None:
+    from simbi_mcp.pbir.extractor import _JS_EXTRACT
+    assert "[data-pbi-page]:not([data-pbi])" in _JS_EXTRACT

@@ -87,6 +87,7 @@ class Bookmark(BaseModel):
     target: list[str] = Field(default_factory=list)
     visible: list[str] = Field(default_factory=list)
     hidden: list[str] = Field(default_factory=list)
+    page_name: str | None = None
 
 
 class ColumnProfile(BaseModel):

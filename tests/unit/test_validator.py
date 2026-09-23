@@ -398,6 +398,47 @@ def test_button_bookmark_action_requires_bookmark_attr(schema) -> None:
         validate_mockup(html, schema)
 
 
+def test_button_navigate_action_requires_page_attr(schema) -> None:
+    html = '<div data-pbi="button" data-pbi-action="navigate"></div>'
+    with pytest.raises(ValidationError, match="data-pbi-page"):
+        validate_mockup(html, schema)
+
+
+def test_button_navigate_unknown_page_is_error(schema) -> None:
+    html = (
+        '<div data-pbi-page="Page 1">'
+        '  <div data-pbi="card" data-pbi-measure="Total Revenue"></div>'
+        '  <div data-pbi="button" data-pbi-action="navigate" data-pbi-page="Page 3"></div>'
+        '</div>'
+    )
+    with pytest.raises(ValidationError, match="unknown page 'Page 3'"):
+        validate_mockup(html, schema)
+
+
+def test_button_navigate_known_page_passes(schema) -> None:
+    html = (
+        '<div data-pbi-page="Page 1">'
+        '  <div data-pbi="card" data-pbi-measure="Total Revenue"></div>'
+        '  <div data-pbi="button" data-pbi-action="navigate" data-pbi-page="Page 2"></div>'
+        '</div>'
+        '<div data-pbi-page="Page 2">'
+        '  <div data-pbi="card" data-pbi-measure="Order Count"></div>'
+        '</div>'
+    )
+    validate_mockup(html, schema)  # must not raise
+
+
+def test_button_invalid_action_is_error(schema) -> None:
+    html = '<div data-pbi="button" data-pbi-action="invalidAction"></div>'
+    with pytest.raises(ValidationError, match="data-pbi-action='invalidAction' is invalid"):
+        validate_mockup(html, schema)
+
+
+def test_button_reset_action_passes(schema) -> None:
+    html = '<div data-pbi="button" data-pbi-action="reset" data-pbi-text="Reset All"></div>'
+    validate_mockup(html, schema)  # must not raise
+
+
 # ---------- Bar chart time-axis heuristic warning ----------
 
 

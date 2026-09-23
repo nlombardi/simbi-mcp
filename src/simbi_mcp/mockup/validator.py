@@ -88,9 +88,14 @@ class _AnnotationCollector(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
         self.nodes: list[dict[str, str]] = []
+        self.pages: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attr_dict = {k: v or "" for k, v in attrs}
+        if "data-pbi-page" in attr_dict and "data-pbi" not in attr_dict:
+            pname = attr_dict["data-pbi-page"].strip()
+            if pname:
+                self.pages.append(pname)
         if "data-pbi" in attr_dict:
             self.nodes.append(attr_dict)
 
@@ -128,7 +133,7 @@ def validate_mockup(html: str, schema: ModelSchema) -> list[str]:
         all_warnings.extend(_validate_node(node, schema))
 
     # Cross-visual checks: duplicate ids, bookmark/button references
-    _check_cross_references(collector.nodes)
+    _check_cross_references(collector.nodes, pages=collector.pages)
 
     return all_warnings
 
@@ -229,6 +234,16 @@ def _validate_node(attrs: dict[str, str], schema: ModelSchema) -> list[str]:
             else:
                 _check_measure(token, schema, "data-pbi-columns", vtype)
 
+    # Validate button action — must be one of the supported behaviors.
+    if vtype is VisualType.BUTTON and "data-pbi-action" in attrs:
+        action = attrs["data-pbi-action"]
+        if action not in ("bookmark", "navigate", "back", "reset", "blank"):
+            raise ValidationError(
+                f"data-pbi-action={action!r} is invalid. "
+                f"Must be one of: 'bookmark', 'navigate', 'back', 'reset', 'blank'.\n"
+                f"Correct shape:\n{_example_for(vtype)}"
+            )
+
     # Validate slicer style — must be one of the three accepted values.
     if vtype is VisualType.SLICER and "data-pbi-style" in attrs:
         style = attrs["data-pbi-style"].lower()
@@ -328,9 +343,9 @@ def _split_ids(value: str) -> list[str]:
     return [t.strip() for t in value.split(",") if t.strip()]
 
 
-def _check_cross_references(nodes: list[dict[str, str]]) -> None:
+def _check_cross_references(nodes: list[dict[str, str]], pages: list[str] | None = None) -> None:
     """Cross-visual checks: data-pbi-id uniqueness, bookmark id refs, button
-    bookmark refs. Mirrors what the emitter resolves later so failures surface
+    bookmark/navigate refs. Mirrors what the emitter resolves later so failures surface
     at lint time, not emit time."""
     ids = [n["data-pbi-id"] for n in nodes if n.get("data-pbi-id")]
     dupes = sorted({i for i in ids if ids.count(i) > 1})
@@ -361,15 +376,28 @@ def _check_cross_references(nodes: list[dict[str, str]]) -> None:
                             f"unknown visual id {token!r}. Known ids: {sorted(id_set)}. "
                             f"Give the target visual a data-pbi-id attribute."
                         )
-        elif n.get("data-pbi") == "button" and n.get("data-pbi-action") == "bookmark":
-            bm = n.get("data-pbi-bookmark", "").strip()
-            if not bm:
-                raise ValidationError(
-                    'Button with data-pbi-action="bookmark" is missing data-pbi-bookmark. '
-                    f"Known bookmarks: {sorted(name_set)}"
-                )
-            if bm not in name_set:
-                raise ValidationError(
-                    f"Button references unknown bookmark {bm!r}. "
-                    f"Known bookmarks: {sorted(name_set)}"
-                )
+        elif n.get("data-pbi") == "button":
+            action = n.get("data-pbi-action")
+            if action == "bookmark":
+                bm = n.get("data-pbi-bookmark", "").strip()
+                if not bm:
+                    raise ValidationError(
+                        'Button with data-pbi-action="bookmark" is missing data-pbi-bookmark. '
+                        f"Known bookmarks: {sorted(name_set)}"
+                    )
+                if bm not in name_set:
+                    raise ValidationError(
+                        f"Button references unknown bookmark {bm!r}. "
+                        f"Known bookmarks: {sorted(name_set)}"
+                    )
+            elif action == "navigate":
+                target_page = n.get("data-pbi-page", "").strip()
+                if not target_page:
+                    raise ValidationError(
+                        'Button with data-pbi-action="navigate" is missing data-pbi-page.'
+                    )
+                if pages and target_page not in pages:
+                    raise ValidationError(
+                        f"Button references unknown page {target_page!r}. "
+                        f"Known pages: {sorted(pages)}"
+                    )
