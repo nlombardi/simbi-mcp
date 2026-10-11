@@ -1,0 +1,236 @@
+table sales_small
+	lineageTag: b413e652-6625-4fb9-b4d6-f9c31b7f9922
+
+	measure 'Order Count' = COUNTROWS(sales_small)
+		formatString: #,0
+		lineageTag: cde777a123ce426ca051
+
+	measure 'Total Revenue' = SUM(sales_small[Revenue])
+		formatString: \$#,0.00
+		lineageTag: e11615b8d06a4b0e97a5
+
+	measure 'Average Unit Price' = AVERAGE(sales_small[UnitPrice])
+		formatString: \$#,0.00
+		lineageTag: 1fd2c25a16ea47eb9c4c
+
+	measure 'Revenue Sparkline' =
+			VAR _W = 120
+			VAR _H = 32
+			VAR _Months =
+			    GROUPBY(
+			        ADDCOLUMNS( ALL( sales_small[OrderDate] ), "@i", YEAR( sales_small[OrderDate] ) * 12 + MONTH( sales_small[OrderDate] ) ),
+			        [@i]
+			    )
+			VAR _Pts =
+			    ADDCOLUMNS(
+			        _Months,
+			        "@v",
+			            VAR _i = [@i]
+			            RETURN CALCULATE( [Total Revenue], FILTER( ALL( sales_small[OrderDate] ), YEAR( sales_small[OrderDate] ) * 12 + MONTH( sales_small[OrderDate] ) = _i ) ) + 0
+			    )
+			VAR _MinI = MINX( _Pts, [@i] )
+			VAR _MaxI = MAXX( _Pts, [@i] )
+			VAR _MinV = MINX( _Pts, [@v] )
+			VAR _MaxV = MAXX( _Pts, [@v] )
+			VAR _Points =
+			    CONCATENATEX(
+			        _Pts,
+			        FORMAT( DIVIDE( [@i] - _MinI, _MaxI - _MinI ) * ( _W - 4 ) + 2, "0.0", "en-US" ) & "," & FORMAT( _H - 2 - DIVIDE( [@v] - _MinV, _MaxV - _MinV ) * ( _H - 4 ), "0.0", "en-US" ),
+			        " ",
+			        [@i], ASC
+			    )
+			RETURN
+			    "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='" & _W & "' height='" & _H & "' viewBox='0 0 " & _W & " " & _H & "'><polyline fill='none' stroke='%23118DFF' stroke-width='2' stroke-linejoin='round' points='" & _Points & "'/></svg>"
+		lineageTag: 7c1e0b2a9f3d4e51a8b6
+		dataCategory: ImageUrl
+
+	measure 'Revenue Share Bar' =
+			VAR _Share = DIVIDE( [Total Revenue], CALCULATE( [Total Revenue], ALL( sales_small[Category] ) ) )
+			VAR _Wd = FORMAT( _Share * 100, "0.0", "en-US" )
+			RETURN
+			    "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='16' viewBox='0 0 100 16'><rect width='100' height='16' rx='3' fill='%23E6E6E6'/><rect width='" & _Wd & "' height='16' rx='3' fill='%23118DFF'/><text x='96' y='12' font-family='Segoe UI' font-size='10' text-anchor='end' fill='%23252423'>" & FORMAT( _Share * 100, "0", "en-US" ) & "%25</text></svg>"
+		lineageTag: 3b8f2d6e1a4c4f97b0d2
+		dataCategory: ImageUrl
+
+	measure 'Revenue Trend Arrow' =
+			VAR _N = 3
+			VAR _Last = CALCULATE( MAX( sales_small[OrderDate] ), ALL( sales_small[OrderDate] ) )
+			VAR _LastI = YEAR( _Last ) * 12 + MONTH( _Last )
+			VAR _Cur = CALCULATE( [Total Revenue], FILTER( ALL( sales_small[OrderDate] ), YEAR( sales_small[OrderDate] ) * 12 + MONTH( sales_small[OrderDate] ) = _LastI ) )
+			VAR _Base =
+			    DIVIDE(
+			        CALCULATE( [Total Revenue], FILTER( ALL( sales_small[OrderDate] ), VAR _i = YEAR( sales_small[OrderDate] ) * 12 + MONTH( sales_small[OrderDate] ) RETURN _i >= _LastI - _N && _i < _LastI ) ),
+			        _N
+			    )
+			VAR _Chg = DIVIDE( _Cur - _Base, _Base )
+			VAR _Dir = SWITCH( TRUE(), ISBLANK( _Chg ), 0, _Chg > 0.02, 1, _Chg < -0.02, -1, 0 )
+			VAR _Col = SWITCH( _Dir, 1, "%23107C10", -1, "%23D13438", "%23605E5C" )
+			VAR _Shape = SWITCH( _Dir, 1, "<path d='M7 2 L13 11 L1 11 Z'", -1, "<path d='M1 5 L13 5 L7 14 Z'", "<path d='M1 7 H13 V9 H1 Z'" )
+			VAR _Txt = IF( ISBLANK( _Chg ), "n/a", SUBSTITUTE( FORMAT( _Chg, "+0%;-0%;0%", "en-US" ), "%", "%25" ) )
+			RETURN
+			    "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='64' height='16' viewBox='0 0 64 16'>" & _Shape & " fill='" & _Col & "'/><text x='18' y='12' font-family='Segoe UI' font-size='11' font-weight='600' fill='" & _Col & "'>" & _Txt & "</text></svg>"
+		lineageTag: 5d2a9c4e7b1f4a3c8e60
+		dataCategory: ImageUrl
+
+	measure 'Revenue Sparkline Hex' = SUBSTITUTE( [Revenue Sparkline], "%23", "#" )
+		lineageTag: 2f6c8a1e5d9b4c07a3e4
+		dataCategory: ImageUrl
+
+	measure 'Revenue vs Avg Badge' =
+			VAR _Avg = AVERAGEX( ALL( sales_small[Category] ), [Total Revenue] )
+			VAR _Var = [Total Revenue] - _Avg
+			VAR _Pos = _Var >= 0
+			VAR _Bg = IF( _Pos, "%23DFF6DD", "%23FDE7E9" )
+			VAR _Fg = IF( _Pos, "%23107C10", "%23A4262C" )
+			VAR _Txt = IF( _Pos, "+", "-" ) & FORMAT( ABS( _Var ), "$#,0", "en-US" )
+			RETURN
+			    IF(
+			        HASONEVALUE( sales_small[Category] ),
+			        "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='84' height='18' viewBox='0 0 84 18'><rect width='84' height='18' rx='9' fill='" & _Bg & "'/><text x='42' y='13' font-family='Segoe UI' font-size='11' font-weight='600' text-anchor='middle' fill='" & _Fg & "'>" & _Txt & "</text></svg>"
+			    )
+		lineageTag: 9e4b1d7a3c6f4e28b5a1
+		dataCategory: ImageUrl
+
+	column OrderID
+		dataType: int64
+		formatString: 0
+		lineageTag: 3d8d177a-e3ad-4096-a06e-d81fef7c6135
+		summarizeBy: count
+		sourceColumn: OrderID
+
+		annotation SummarizationSetBy = Automatic
+
+	column OrderDate
+		dataType: dateTime
+		formatString: Long Date
+		lineageTag: 5af35c2a-b27a-4854-9caa-5996a2d3f052
+		summarizeBy: none
+		sourceColumn: OrderDate
+
+		variation Variation
+			isDefault
+			relationship: 5f67ddfc-bff2-403a-a89d-2dfce247cec5
+			defaultHierarchy: LocalDateTable_2d70ac87-54f3-42f7-a352-cffe341d86ba.'Date Hierarchy'
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column Region
+		dataType: string
+		lineageTag: df4b7b76-b68f-4cc2-8016-ff82b0ae5b7e
+		summarizeBy: none
+		sourceColumn: Region
+
+		annotation SummarizationSetBy = Automatic
+
+	column Product
+		dataType: string
+		lineageTag: 0e3f2af7-0305-4955-ada2-3ced78de08a1
+		summarizeBy: none
+		sourceColumn: Product
+
+		annotation SummarizationSetBy = Automatic
+
+	column Category
+		dataType: string
+		lineageTag: 8bd36eec-99ce-4cef-8406-87e76ecec5b4
+		summarizeBy: none
+		sourceColumn: Category
+
+		annotation SummarizationSetBy = Automatic
+
+	column UnitsSold
+		dataType: int64
+		formatString: 0
+		lineageTag: 29bbed14-bec1-4c9a-8e8d-62712c584e25
+		summarizeBy: sum
+		sourceColumn: UnitsSold
+
+		annotation SummarizationSetBy = Automatic
+
+	column UnitPrice
+		dataType: double
+		lineageTag: 5c25e915-0218-45b0-8257-3bc390299a55
+		summarizeBy: sum
+		sourceColumn: UnitPrice
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column Revenue
+		dataType: double
+		lineageTag: 958a779a-65cb-4ef0-a8e3-439b95afa882
+		summarizeBy: sum
+		sourceColumn: Revenue
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	partition sales_small = m
+		mode: import
+		source =
+				let
+				    // Data inlined so the spike opens on any machine (no local file path).
+				    Source = #table(
+				        type table [OrderID = Int64.Type, OrderDate = date, Region = text, Product = text, Category = text, UnitsSold = Int64.Type, UnitPrice = number, Revenue = number],
+				        {
+				            {1001, #date(2025, 1, 5), "North", "Widget A", "Widgets", 12, 49.99, 599.88},
+				            {1002, #date(2025, 1, 12), "South", "Gadget X", "Gadgets", 5, 129.00, 645.00},
+				            {1003, #date(2025, 1, 19), "North", "Widget B", "Widgets", 8, 59.99, 479.92},
+				            {1004, #date(2025, 2, 3), "East", "Gizmo 1", "Gizmos", 3, 249.99, 749.97},
+				            {1005, #date(2025, 2, 10), "South", "Widget A", "Widgets", 15, 49.99, 749.85},
+				            {1006, #date(2025, 2, 17), "East", "Gadget X", "Gadgets", 7, 129.00, 903.00},
+				            {1007, #date(2025, 3, 1), "North", "Gizmo 1", "Gizmos", 2, 249.99, 499.98},
+				            {1008, #date(2025, 3, 8), "West", "Widget B", "Widgets", 20, 59.99, 1199.80},
+				            {1009, #date(2025, 3, 15), "West", "Gadget X", "Gadgets", 4, 129.00, 516.00},
+				            {1010, #date(2025, 3, 22), "East", "Widget A", "Widgets", 11, 49.99, 549.89},
+				            {1011, #date(2025, 4, 1), "South", "Gizmo 2", "Gizmos", 6, 199.99, 1199.94},
+				            {1012, #date(2025, 4, 8), "North", "Gadget Y", "Gadgets", 9, 149.00, 1341.00},
+				            {1013, #date(2025, 4, 15), "West", "Widget A", "Widgets", 14, 49.99, 699.86},
+				            {1014, #date(2025, 4, 22), "East", "Gizmo 2", "Gizmos", 1, 199.99, 199.99},
+				            {1015, #date(2025, 5, 5), "North", "Gadget Y", "Gadgets", 10, 149.00, 1490.00},
+				            {1016, #date(2025, 5, 12), "South", "Widget B", "Widgets", 18, 59.99, 1079.82},
+				            {1017, #date(2025, 5, 19), "West", "Gizmo 1", "Gizmos", 5, 249.99, 1249.95},
+				            {1018, #date(2025, 5, 26), "East", "Gadget Y", "Gadgets", 3, 149.00, 447.00},
+				            {1019, #date(2025, 6, 2), "North", "Widget A", "Widgets", 22, 49.99, 1099.78},
+				            {1020, #date(2025, 6, 9), "South", "Gizmo 2", "Gizmos", 8, 199.99, 1599.92},
+				            {1021, #date(2025, 6, 16), "West", "Gadget X", "Gadgets", 6, 129.00, 774.00},
+				            {1022, #date(2025, 6, 23), "East", "Widget B", "Widgets", 13, 59.99, 779.87},
+				            {1023, #date(2025, 7, 1), "North", "Gizmo 2", "Gizmos", 4, 199.99, 799.96},
+				            {1024, #date(2025, 7, 8), "South", "Widget A", "Widgets", 17, 49.99, 849.83},
+				            {1025, #date(2025, 7, 15), "East", "Gadget X", "Gadgets", 11, 129.00, 1419.00},
+				            {1026, #date(2025, 7, 22), "West", "Gizmo 1", "Gizmos", 7, 249.99, 1749.93},
+				            {1027, #date(2025, 7, 29), "North", "Widget B", "Widgets", 25, 59.99, 1499.75},
+				            {1028, #date(2025, 8, 5), "South", "Gadget Y", "Gadgets", 2, 149.00, 298.00},
+				            {1029, #date(2025, 8, 12), "East", "Widget A", "Widgets", 19, 49.99, 949.81},
+				            {1030, #date(2025, 8, 19), "West", "Gizmo 2", "Gizmos", 9, 199.99, 1799.91},
+				            {1031, #date(2025, 8, 26), "North", "Gadget X", "Gadgets", 14, 129.00, 1806.00},
+				            {1032, #date(2025, 9, 2), "South", "Widget B", "Widgets", 6, 59.99, 359.94},
+				            {1033, #date(2025, 9, 9), "East", "Gizmo 1", "Gizmos", 10, 249.99, 2499.90},
+				            {1034, #date(2025, 9, 16), "West", "Widget A", "Widgets", 8, 49.99, 399.92},
+				            {1035, #date(2025, 9, 23), "North", "Gadget Y", "Gadgets", 15, 149.00, 2235.00},
+				            {1036, #date(2025, 10, 1), "South", "Gizmo 1", "Gizmos", 3, 249.99, 749.97},
+				            {1037, #date(2025, 10, 8), "East", "Widget B", "Widgets", 21, 59.99, 1259.79},
+				            {1038, #date(2025, 10, 15), "West", "Gadget Y", "Gadgets", 7, 149.00, 1043.00},
+				            {1039, #date(2025, 10, 22), "North", "Widget A", "Widgets", 16, 49.99, 799.84},
+				            {1040, #date(2025, 10, 29), "South", "Gadget X", "Gadgets", 12, 129.00, 1548.00},
+				            {1041, #date(2025, 11, 5), "East", "Gizmo 2", "Gizmos", 5, 199.99, 999.95},
+				            {1042, #date(2025, 11, 12), "West", "Widget B", "Widgets", 10, 59.99, 599.90},
+				            {1043, #date(2025, 11, 19), "North", "Gadget X", "Gadgets", 8, 129.00, 1032.00},
+				            {1044, #date(2025, 11, 26), "South", "Gizmo 2", "Gizmos", 20, 199.99, 3999.80},
+				            {1045, #date(2025, 12, 3), "East", "Widget A", "Widgets", 9, 49.99, 449.91},
+				            {1046, #date(2025, 12, 10), "West", "Gadget Y", "Gadgets", 4, 149.00, 596.00},
+				            {1047, #date(2025, 12, 17), "North", "Gizmo 1", "Gizmos", 11, 249.99, 2749.89},
+				            {1048, #date(2025, 12, 20), "South", "Widget B", "Widgets", 24, 59.99, 1439.76},
+				            {1049, #date(2025, 12, 24), "East", "Gadget X", "Gadgets", 6, 129.00, 774.00},
+				            {1050, #date(2025, 12, 31), "West", "Gizmo 2", "Gizmos", 13, 199.99, 2599.87}
+				        }
+				    )
+				in
+				    Source
+
+	annotation PBI_ResultType = Table
+

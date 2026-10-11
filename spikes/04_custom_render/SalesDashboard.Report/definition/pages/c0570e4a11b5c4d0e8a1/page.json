@@ -1,0 +1,8 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/page/2.0.0/schema.json",
+  "name": "c0570e4a11b5c4d0e8a1",
+  "displayName": "Custom Render",
+  "displayOption": "FitToPage",
+  "height": 720,
+  "width": 1280
+}
